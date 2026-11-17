@@ -964,6 +964,7 @@ static const TIOStringRow Rows[]={
     {"ota.package.pick","Firmware to install","要安装的固件"},
     {"ota.package.stockDetail","Unmodified stock Strix OS %@","未修改的原厂 Strix OS %@"},
     {"ota.package.stockName","Stock %@","原厂 %@"},
+    {"ota.package.externalDetail","Third-party R1; never flashed from C22 or on real glasses as far as its publisher reports. Turbo phone features target TMG12 and are not expected to work. Stock 1.0.6.11 is the way back.","第三方 R1；C22 从未刷写，据发布者所述也未在真实眼镜上刷写。本分支 Turbo 手机功能面向 TMG12，预计不适用于 R1。可刷回原厂 1.0.6.11。"},
     {"ota.package.tmgDetail","%@: Turbo AP, other files stock","%@：Turbo AP，其余文件为原厂"},
     {"ota.package.unknown","Unknown firmware package; nothing changed.","未知固件包；未做更改。"},
     {"ota.version.accepted","Read · %@ accepts it","已读取 · %@ 可安装"},

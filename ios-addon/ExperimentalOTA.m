@@ -8,7 +8,7 @@
 #include <unistd.h>
 #include <errno.h>
 
-// Which release this build is (a cN name from releases.json, today c21) and its packages: turbo-package.sh and package.mjs look for this exact string.
+// Which release this build is (a cN name from releases.json, today c22) and its packages: turbo-package.sh and package.mjs look for this exact string.
 __attribute__((used)) const char TIOOTAReleaseMarker[]=TIO_FW_RELEASE_MARKER;
 NSString *TIOOTARelease(void){return TIO_FW_RELEASE;}
 NSString *TIOOTAReleaseFolder(void){return TIO_FW_OTA_FOLDER;}
@@ -23,7 +23,7 @@ static BOOL PinsUsable(NSDictionary *pins){
     return YES;
 }
 static BOOL PackageUsable(NSDictionary *p){
-    return [p isKindOfClass:NSDictionary.class]&&[p[@"name"] isKindOfClass:NSString.class]&&[p[@"name"] length]&&([p[@"kind"] isEqual:@"TMG"]||[p[@"kind"] isEqual:@"STOCK"])
+    return [p isKindOfClass:NSDictionary.class]&&[p[@"name"] isKindOfClass:NSString.class]&&[p[@"name"] length]&&([p[@"kind"] isEqual:@"TMG"]||[p[@"kind"] isEqual:@"STOCK"]||([p[@"kind"] isEqual:@"EXTERNAL"]&&[p[@"name"] isEqual:@"TMIG2-VIDEO-R1"]))
         &&[p[@"resource"] isKindOfClass:NSString.class]&&[p[@"zipBytes"] isKindOfClass:NSNumber.class]&&[p[@"zipBytes"] unsignedIntegerValue]>0
         &&[p[@"zipSHA256"] isKindOfClass:NSString.class]&&[p[@"zipSHA256"] length]==64&&[p[@"otaVersion"] isKindOfClass:NSString.class]&&[p[@"otaVersion"] length]
         &&[p[@"acceptOsVersions"] isKindOfClass:NSArray.class]&&[p[@"acceptQueryCodes"] isKindOfClass:NSArray.class]&&PinsUsable(p[@"memberPins"]);
@@ -51,7 +51,7 @@ NSDictionary *TIOCheckExperimentalOTA(NSData *data,NSDictionary *package,NSError
     // The exact archive has independently passed full ZIP/manifest/AP auditing
     // on Mac (phone_pins.py). This is exact-byte identity, not a generic ZIP manifest parser.
     BOOL stock=[package[@"kind"] isEqual:@"STOCK"];NSUInteger members=[package[@"memberPins"] count];
-    return @{@"schema":@1,@"candidate":stock?TIOOTAPackageDisplayName(package):[@"Turbo Menu " stringByAppendingString:package[@"name"]],@"package":package[@"name"],@"baseFirmware":TIO_FW_BASE,
+    return @{@"schema":@1,@"candidate":[package[@"kind"] isEqual:@"TMG"]?[@"Turbo Menu " stringByAppendingString:package[@"name"]]:TIOOTAPackageDisplayName(package),@"package":package[@"name"],@"baseFirmware":TIO_FW_BASE,
              @"archiveSHA256":hex,@"archiveBytes":@(data.length),@"changedPayloads":stock?@[]:@[@"nuttx_ap.bin"],
              @"unchangedPayloadCount":@(members-(stock?1:2)),@"integrityPassed":@YES,@"sent":@NO,
              @"runtimeValidated":@NO,@"officialDispatchConnected":@NO};
@@ -77,7 +77,7 @@ NSDictionary *TIOImportExperimentalOTA(NSURL *source,NSURL *directory,NSDictiona
     NSFileManager *fm=NSFileManager.defaultManager;
     if(![fm createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions:@0700} error:error])return nil;
     if(![directory setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:error])return nil;
-    // Each package has its own file, named by its SHA-256, so the two packages never share a copy.
+    // Each package has its own file, named by its SHA-256, so packages never share a copy.
     NSURL *destination=[directory URLByAppendingPathComponent:TIOOTAPackageArchiveName(package)];
     if([fm fileExistsAtPath:destination.path]){
         if(!TIOReadExperimentalOTA(destination,package,error))return nil;
@@ -121,6 +121,5 @@ NSDictionary<NSString *,NSData *> *TIOCopyExperimentalOTAPayloads(NSURL *directo
 // The official ota/<folder> check for the package: every member it pins reads back as above.
 NSDictionary *TIOCheckOfficialOTADirectory(NSURL *directory,NSDictionary *package,NSError **error){
     NSDictionary *files=TIOCopyExperimentalOTAPayloads(directory,package,error);if(!files)return nil;
-    BOOL stock=[package[@"kind"] isEqual:@"STOCK"];
-    return @{@"candidate":stock?TIOOTAPackageDisplayName(package):[@"Turbo Menu " stringByAppendingString:package[@"name"]],@"package":package[@"name"],@"checkedMembers":@(files.count),@"integrityPassed":@YES,@"transferSessionBound":@NO,@"sent":@NO,@"flashAuthorized":@NO};
+    return @{@"candidate":[package[@"kind"] isEqual:@"TMG"]?[@"Turbo Menu " stringByAppendingString:package[@"name"]]:TIOOTAPackageDisplayName(package),@"package":package[@"name"],@"checkedMembers":@(files.count),@"integrityPassed":@YES,@"transferSessionBound":@NO,@"sent":@NO,@"flashAuthorized":@NO};
 }

@@ -9,7 +9,7 @@
   "manifestSHA256": "5d174ed0ecb3dd15806c22af49e88956775bdddfea7e5c9233e32a235cc4837c",
   "payloadBytes": 18474970,
   "payloadSlices": 369,
-  "release": "c21",
+  "release": "c22",
   "stockBase": "1.0.6.11",
   "otaVersion": "Strix OS 1.0.6.11",
   "folder": "Strix_OS_1.0.6.11",
@@ -67,6 +67,27 @@
       ],
       "acceptQueryCodes": [
         "01.00.05.0012",
+        "01.00.06.0011"
+      ]
+    },
+    {
+      "name": "TMIG2-VIDEO-R1",
+      "zipBytes": 9589819,
+      "zipSHA256": "c03321061605aba186b44e7b90d86d3b13a2f75e081687fc684680e2800a4e8a",
+      "apBytes": 8196152,
+      "apSHA256": "066f43d76dee15ee9c267903982eaddd3f0835066e03ea43827f84d7e764cf5f",
+      "apMD5": "ab2c70e8862539329c06799a13698316",
+      "manifestBytes": 2886,
+      "manifestSHA256": "eb8718a5bea071fa74b0a6f64cf216dad70236b0600ed82ffe5989e7e7347ae3",
+      "payloadBytes": 18538762,
+      "payloadSlices": 371,
+      "kind": "EXTERNAL",
+      "resource": "TurboExternalFirmware.zip",
+      "otaVersion": "Strix OS 1.0.6.11",
+      "acceptOsVersions": [
+        "Strix OS 1.0.6.11"
+      ],
+      "acceptQueryCodes": [
         "01.00.06.0011"
       ]
     }

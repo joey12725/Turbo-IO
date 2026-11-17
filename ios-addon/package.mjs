@@ -12,6 +12,7 @@ import {patch as patchOTARoute,verifyRoute,routeProfile} from './patch-route.mjs
 export const CANDIDATE_RESOURCE='TurboWeReadCandidate.zip';
 // The second package of a release, the stock ZIP of its base, has its own fixed resource name beside the TMG one.
 export const STOCK_RESOURCE='TurboStockFirmware.zip';
+export const EXTERNAL_RESOURCE='TurboExternalFirmware.zip';
 export const PRIVATE_NAME=/Private|CookieImport|KnowledgeConnection/;
 export const ALLOWED_BUNDLE_PRIVATE=new Set(['TurboIOPrivatePreparation.json','Frameworks/TurboIOPrivateAddon.dylib']);
 export function privateBundleNames(dir,allowed=new Set()){
@@ -52,19 +53,22 @@ export function releasePins(name=soleRelease()){
   return p;
 }
 // The packages of a release (firmware-pins-cN.json "packages", phone_pins.py): the first is the TMG build the
-// top level describes, bundled as CANDIDATE_RESOURCE; a second one is the stock package, bundled as STOCK_RESOURCE.
+// top level describes, followed by stock and optionally the explicitly known external build. Each has its own resource.
 export function releasePackages(p){
   const list=p?.packages;
-  if(!Array.isArray(list)||list.length<1||list.length>2)throw Error('release_packages_invalid');
+  if(!Array.isArray(list)||list.length<1||list.length>3)throw Error('release_packages_invalid');
   list.forEach((e,i)=>{
-    const want=i===0?{kind:'TMG',resource:CANDIDATE_RESOURCE}:{kind:'STOCK',resource:STOCK_RESOURCE};
+    const want=[{kind:'TMG',resource:CANDIDATE_RESOURCE},{kind:'STOCK',resource:STOCK_RESOURCE},{kind:'EXTERNAL',resource:EXTERNAL_RESOURCE}][i];
     if(!e||e.kind!==want.kind||e.resource!==want.resource||typeof e.name!=='string'||!/^[0-9a-f]{64}$/.test(e.zipSHA256??'')||!Number.isInteger(e.zipBytes)||e.zipBytes<=0)throw Error('release_packages_invalid');
   });
   if(list[0].name!==p.name||list[0].zipSHA256!==p.zipSHA256||list[0].zipBytes!==p.zipBytes)throw Error('release_packages_invalid');
   if(list[1]&&list[1].name!=='STOCK-'+p.stockBase)throw Error('release_packages_invalid');
+  if(!/^TMG[0-9]+$/.test(list[0].name)||new Set(list.map(e=>e.zipSHA256)).size!==list.length)throw Error('release_packages_invalid');
+  if(list[2]&&(list[2].name!=='TMIG2-VIDEO-R1'||p.stockBase!=='1.0.6.11'||JSON.stringify(list[2].acceptOsVersions)!==JSON.stringify(['Strix OS 1.0.6.11'])||JSON.stringify(list[2].acceptQueryCodes)!==JSON.stringify(['01.00.06.0011'])))throw Error('release_packages_invalid');
   return list;
 }
 export function stockPackage(p){return releasePackages(p)[1];}
+export function externalPackage(p){return releasePackages(p)[2];}
 // The addon names its release in one string (ExperimentalOTA.m, from FirmwarePins.h): it must be the requested
 // release with its ZIPs, and must not also carry another release's marker. The first package keeps the old shape;
 // each other package follows as "; package=<label>; zip=<sha>; accepts ...".
@@ -196,7 +200,7 @@ export function validateOptions(o) {
   if(fs.existsSync(o.out))throw Error('output_must_not_exist');
   if(!host.firmware){
     // Download-only: nothing to flash, no TMG candidate, no device-model injection.
-    if(o.bundle!=='com.rayneo.venus.pub'||o.firmware!==undefined||o['stock-firmware']!==undefined||o['experimental-ota']!==undefined||o.product!==undefined)throw Error('download_only_host_takes_no_firmware_or_product');
+    if(o.bundle!=='com.rayneo.venus.pub'||o.firmware!==undefined||o['stock-firmware']!==undefined||o['external-firmware']!==undefined||o['experimental-ota']!==undefined||o.product!==undefined)throw Error('download_only_host_takes_no_firmware_or_product');
     return;
   }
   if(host.noProduct&&o.product!==undefined)throw Error('full_host_takes_no_product');
@@ -207,6 +211,7 @@ export function validateOptions(o) {
   if(o.bundle!=='com.rayneo.venus.pub'||typeof o.firmware!=='string'||!path.isAbsolute(o.firmware))throw Error('exact_host_and_firmware_resource_required');
   // A release with a stock package bundles its ZIP too (--stock-firmware); one without takes none.
   if(stockPackage(release)?(typeof o['stock-firmware']!=='string'||!path.isAbsolute(o['stock-firmware'])):o['stock-firmware']!==undefined)throw Error('stock_firmware_resource_required');
+  if(externalPackage(release)?(typeof o['external-firmware']!=='string'||!path.isAbsolute(o['external-firmware'])):o['external-firmware']!==undefined)throw Error('external_firmware_resource_required');
 }
 export function validateResearchPair(symbols, kind, firmware, p=releasePins()) {
   if(kind!==p.name||!symbols.includes('_TIOMenuLayoutController')||!symbols.includes('OBJC_CLASS_$_TIORoadMap'))throw Error('ios107_addon_required');
@@ -217,6 +222,12 @@ export function validateResearchPair(symbols, kind, firmware, p=releasePins()) {
 export function validateStockPackage(stock,p=releasePins()){
   const e=stockPackage(p);
   if(!e||!Buffer.isBuffer(stock)||stock.length!==e.zipBytes||createHash('sha256').update(stock).digest('hex')!==e.zipSHA256)throw Error('stock_firmware_identity_mismatch');
+  return true;
+}
+// External packages pass the same exact-byte check before any bundle is created.
+export function validateExternalPackage(bytes,p=releasePins()){
+  const e=externalPackage(p);
+  if(!e||!Buffer.isBuffer(bytes)||bytes.length!==e.zipBytes||digest(bytes)!==e.zipSHA256)throw Error('external_firmware_identity_mismatch');
   return true;
 }
 // Location prompts for whichever navigation provider the addon links; null when none does.
@@ -269,12 +280,12 @@ function main(){
   if(process.argv.includes('--help'))console.log('Optional Apple AI: --apple-ai-dylib /absolute/TurboAppleAI.dylib (requires TIO_APPLE_AI=1 addon)');
   if(process.argv.includes('--help'))console.log('Optional local translation: --translation-module-dir /absolute/module --translation-models /absolute/models (requires TIO_LOCAL_TRANSLATION=1 addon; see ios-addon/local-translation/README.md)');
   if(process.argv.includes('--help'))console.log('Download-only 1.0.21/1 (C19): --host ios1021-download, no --firmware, no --release and no --product. App.framework stays stock; no OTA flashing.');
-  if(process.argv.includes('--help'))console.log('Full 1.0.21/1 (C21): --host ios1021 [--release cN] with --firmware (the TMG package) and --stock-firmware (the stock package, when the release lists one), no --product: a release whose releases.json hosts list 1021-full (without --release, the only release). Route patch at the 1.0.21 offsets; every TMG transfer frame needs one authorization in the wizard; needs an addon built for that release.');
+  if(process.argv.includes('--help'))console.log('Full 1.0.21/1 (C22): --host ios1021 [--release cN] with --firmware (the TMG package) and --stock-firmware (stock), --external-firmware (R1), when listed, no --product: a release whose releases.json hosts list 1021-full (without --release, the only release). Route patch at the 1.0.21 offsets; every TMG transfer frame needs one authorization in the wizard; needs an addon built for that release.');
   if(process.argv.includes('--help'))console.log('--host is required: ios1021-download or ios1021. Installation never grants flash permission.');
-  if(process.argv.includes('--help')){console.log('node ios-addon/package.mjs --host ios1021 --app /absolute/Runner.app --addon /absolute/TurboIOPrivateAddon.dylib --profile /absolute/profile.mobileprovision --identity CERTIFICATE_SHA1 --device YOUR_DEVICE_ID --out /absolute/new-private-output --bundle com.rayneo.venus.pub --firmware /absolute/exact-release-CANDIDATE-NOT-APPROVED.zip --stock-firmware /absolute/stock-package.zip [--release cN]');return;}
+  if(process.argv.includes('--help')){console.log('node ios-addon/package.mjs --host ios1021 --app /absolute/Runner.app --addon /absolute/TurboIOPrivateAddon.dylib --profile /absolute/profile.mobileprovision --identity CERTIFICATE_SHA1 --device YOUR_DEVICE_ID --out /absolute/new-private-output --bundle com.rayneo.venus.pub --firmware /absolute/exact-release-CANDIDATE-NOT-APPROVED.zip --stock-firmware /absolute/stock-package.zip --external-firmware /absolute/external-package.zip [--release cN]');return;}
   const o={bundle:'com.rayneo.venus.pub'};const args=process.argv.slice(2);
   if(args.length%2)throw Error('expected_named_arguments');
-  const seen=new Set();for(let i=0;i<args.length;i+=2){const k=args[i].slice(2);if(!args[i].startsWith('--')||!['app','addon','profile','identity','device','out','bundle','product','experimental-ota','firmware','stock-firmware','translation-module-dir','translation-models','apple-ai-dylib','host','release'].includes(k)||seen.has(k))throw Error('unknown_or_duplicate_argument');seen.add(k);o[k]=args[i+1];}
+  const seen=new Set();for(let i=0;i<args.length;i+=2){const k=args[i].slice(2);if(!args[i].startsWith('--')||!['app','addon','profile','identity','device','out','bundle','product','experimental-ota','firmware','stock-firmware','external-firmware','translation-module-dir','translation-models','apple-ai-dylib','host','release'].includes(k)||seen.has(k))throw Error('unknown_or_duplicate_argument');seen.add(k);o[k]=args[i+1];}
   validateOptions(o);
   const host=hostProfile(o.host);
   const symbols=run('/usr/bin/nm',['-g',o.addon],{encoding:'utf8',maxBuffer:64*1024*1024});
@@ -288,7 +299,8 @@ function main(){
   // Only a firmware host bundles a release; a download-only build reads no release pins.
   const release=host.firmware?releasePins(o.release):undefined;
   const stockFirmware=o['stock-firmware']?fs.readFileSync(o['stock-firmware']):undefined;
-  if(host.firmware){validateResearchPair(symbols,release.name,firmware,release);if(stockPackage(release))validateStockPackage(stockFirmware,release);else if(stockFirmware)throw Error('stock_firmware_resource_required');validateReleaseAddon(fs.readFileSync(o.addon),release);}else if(firmware||stockFirmware)throw Error('download_only_host_takes_no_firmware_or_product');
+  const externalFirmware=o['external-firmware']?fs.readFileSync(o['external-firmware']):undefined;
+  if(host.firmware){validateResearchPair(symbols,release.name,firmware,release);if(stockPackage(release))validateStockPackage(stockFirmware,release);else if(stockFirmware)throw Error('stock_firmware_resource_required');if(externalPackage(release))validateExternalPackage(externalFirmware,release);else if(externalFirmware)throw Error('external_firmware_resource_required');validateReleaseAddon(fs.readFileSync(o.addon),release);}else if(firmware||stockFirmware||externalFirmware)throw Error('download_only_host_takes_no_firmware_or_product');
   if(!host.routePatch)validateDownloadOnlyAddon(symbols,fs.readFileSync(o.addon));
   if(host.fullHost)validateFullHostAddon(host.name,symbols,fs.readFileSync(o.addon));
   const info=JSON.parse(run('plutil',['-convert','json','-o','-',path.join(source,'Info.plist')],{encoding:'utf8'}));
@@ -327,6 +339,7 @@ print(json.dumps({'entitlements':p['Entitlements'],'expires':p['ExpirationDate']
     run('plutil',['-insert','TIOExperimentalOTABuild','-string',release.name,plist]);
     if(firmware)fs.writeFileSync(path.join(app,CANDIDATE_RESOURCE),firmware,{flag:'wx'});
     if(stockFirmware)fs.writeFileSync(path.join(app,STOCK_RESOURCE),stockFirmware,{flag:'wx'});
+    if(externalFirmware)fs.writeFileSync(path.join(app,EXTERNAL_RESOURCE),externalFirmware,{flag:'wx'});
     const info=JSON.parse(run('plutil',['-convert','json','-o','-',plist],{encoding:'utf8'}));
     if(!info.NSAppTransportSecurity)run('plutil',['-insert','NSAppTransportSecurity','-dictionary',plist]);
     if(info.NSAppTransportSecurity?.NSAllowsLocalNetworking===undefined)run('plutil',['-insert','NSAppTransportSecurity.NSAllowsLocalNetworking','-bool','YES',plist]);
@@ -342,11 +355,12 @@ print(json.dumps({'entitlements':p['Entitlements'],'expires':p['ExpirationDate']
     if(!routeProfile(host.routeProfile).outputSHA||digest(fs.readFileSync(path.join(app,'Frameworks/App.framework/App')))!==routeProfile(host.routeProfile).outputSHA)throw Error(tag+'_route_output_mismatch');
     // Every package's ZIP is in the bundle under its fixed name with its pinned bytes, and nothing else under the stock name.
     for(const e of releasePackages(release)){const f=path.join(app,e.resource);if(!fs.existsSync(f)||digest(fs.readFileSync(f))!==e.zipSHA256)throw Error(tag+'_bundle_mismatch');}
+    if(!externalPackage(release)&&fs.existsSync(path.join(app,EXTERNAL_RESOURCE)))throw Error(tag+'_bundle_mismatch');
     if(!stockPackage(release)&&fs.existsSync(path.join(app,STOCK_RESOURCE)))throw Error(tag+'_bundle_mismatch');
   }
   if(!host.routePatch){
     const plist=JSON.parse(run('plutil',['-convert','json','-o','-',path.join(app,'Info.plist')],{encoding:'utf8'}));
-    if(plist.TIOExperimentalOTABuild!==undefined||plist.UISupportedDevices!==undefined||plist.TIOHostProfile!==(host.runtimeMarker??host.name)||fs.existsSync(path.join(app,CANDIDATE_RESOURCE))||fs.existsSync(path.join(app,STOCK_RESOURCE)))throw Error('download_only_bundle_mismatch');
+    if(plist.TIOExperimentalOTABuild!==undefined||plist.UISupportedDevices!==undefined||plist.TIOHostProfile!==(host.runtimeMarker??host.name)||fs.existsSync(path.join(app,CANDIDATE_RESOURCE))||fs.existsSync(path.join(app,STOCK_RESOURCE))||fs.existsSync(path.join(app,EXTERNAL_RESOURCE)))throw Error('download_only_bundle_mismatch');
   }
   if(privateBundleNames(app,ALLOWED_BUNDLE_PRIVATE).length)throw Error('bundle_contains_private_file');
   const ep=path.join(destination,'signing-entitlements.plist');

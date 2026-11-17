@@ -19,7 +19,7 @@ static NSDictionary *Fetch(uint16_t port,NSString *method,NSString *target,NSStr
 }
 static NSDictionary *Query(uint16_t port,NSString *path){NSDictionary *r=Fetch(port,@"GET",path,@"");assert([r[@"code"] intValue]==200);return [NSJSONSerialization JSONObjectWithData:r[@"body"] options:0 error:nil];}
 // The release's feed policy, written out here by hand (not from FirmwarePins.h) so a wrong generated value fails.
-// C21, the only release (TMG12 on 1.0.6.11): flashes glasses that report 1.0.5.12 (TMG11) or 1.0.6.11 (stock, or a
+// C22, the only release (TMG12 on 1.0.6.11): flashes glasses that report 1.0.5.12 (TMG11) or 1.0.6.11 (stock, or a
 // TMG12 flashed again); its releases.json entry must match.
 static NSArray *Accepted(void){return @[@"01.00.05.0012",@"01.00.06.0011"];}
 static NSString *const WantName=@"0100060011";static const int WantCode=100060011;static NSString *const WantFile=@"Strix_OS_1.0.6.11.zip";
@@ -27,7 +27,7 @@ int main(int argc,const char **argv){@autoreleasepool{
     assert([TIO_FW_ACCEPTED_QUERY_CODES isEqual:Accepted()]);
     // A feed request never changes the selection (only TIOOTASelectPackage does): checked after the queries and downloads below.
     assert(TIOOTASelectedPackageIndex()==0);const NSUInteger startGeneration=TIOOTASelectionGeneration();
-    assert(argc==3);NSURL *stockFile=[NSURL fileURLWithPath:[NSString stringWithUTF8String:argv[2]]];NSURL *file=[NSURL fileURLWithPath:[NSString stringWithUTF8String:argv[1]]];NSError *error=nil;
+    assert(argc==4);NSURL *stockFile=[NSURL fileURLWithPath:[NSString stringWithUTF8String:argv[2]]];NSURL *file=[NSURL fileURLWithPath:[NSString stringWithUTF8String:argv[1]]];NSError *error=nil;
     TIOExperimentalOTAFeed *feed=[TIOExperimentalOTAFeed new];assert([feed startOnPort:0 error:&error]);uint16_t port=feed.port;assert(port);
     TIOExperimentalOTAFeed *duplicate=[TIOExperimentalOTAFeed new];assert(![duplicate startOnPort:port error:&error]);assert(!duplicate.port);
     NSString *path=[@"/g/xxxxxxxA78p2M?packageType=firmware&packageName=strix%20OS&glassesType=S3&deviceType=iOS&versionCode=" stringByAppendingString:Accepted()[0]];assert(Query(port,path)[@"data"]==NSNull.null);assert(Query(port,@"/g/xxxxxxxxxxCCXhB?sn=TEST_ONLY")[ @"data"]==NSNull.null);
@@ -77,7 +77,19 @@ int main(int argc,const char **argv){@autoreleasepool{
     // An arm made for an older generation is refused; picking TMG12 again closes the stock window.
     assert(![feed armArchive:stockFile package:TIOOTAPackageAt(1) generation:generation lifetime:60 error:&error]);
     assert(TIOOTASelectPackage(0,&error));assert(![feed.status[@"armed"] boolValue]);assert(Query(port,path)[@"data"]==NSNull.null);
-    assert(!TIOOTASelectPackage(2,&error)&&TIOOTASelectedPackageIndex()==0);
+    assert(!TIOOTASelectPackage(3,&error)&&TIOOTASelectedPackageIndex()==0);
+    assert(TIOOTASelectPackage(2,&error));
+    NSURL *r1File=[NSURL fileURLWithPath:@(argv[3])];
+    assert(![feed armArchive:file lifetime:60 error:&error]&&![feed armArchive:stockFile lifetime:60 error:&error]);
+    assert([feed armArchive:r1File lifetime:60 error:&error]);
+    assert(Query(port,path)[@"data"]==NSNull.null); // R1 never offers an upgrade from 1.0.5.12.
+    NSString *r1Path=[path stringByReplacingOccurrencesOfString:Accepted()[0] withString:@"01.00.06.0011"];
+    NSDictionary *r1Meta=Query(port,r1Path)[@"data"];
+    assert([r1Meta[@"taskName"] isEqual:@"TMIG2-VIDEO-R1"]&&[r1Meta[@"apkSize"] isEqual:@9589819]);
+    NSData *r1Zip=[NSData dataWithContentsOfURL:r1File];
+    assert([Fetch(port,@"GET",[NSURL URLWithString:r1Meta[@"downloadUrl"]].path,@"")[@"body"] isEqual:r1Zip]);
+    assert(TIOOTASelectedPackageIndex()==2);assert(TIOOTASelectPackage(0,&error)&&![feed.status[@"armed"] boolValue]);
+
 #else
     assert(![feed armArchive:file lifetime:60 error:&error]);assert(Query(port,path)[@"data"]==NSNull.null);
 #endif

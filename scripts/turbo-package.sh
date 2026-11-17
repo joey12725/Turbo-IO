@@ -15,7 +15,7 @@ apple_args=()
 # compiled with TIO_RELEASE=cN (that release's FirmwarePins.h block) and bundles that release's ZIP, found under
 # $TURBO_INPUTS at the path releases.json names and refused unless its size and SHA-256 match. The release's hosts
 # (releases.json) must list the --host given. Without --release the build is the only release in releases.json
-# (C21 today); with several releases, --release is required. A release that lists a stock package (releases.json
+# (C22 today); with several releases, --release is required. A release that lists a stock package (releases.json
 # packages, STOCK-<base>) bundles that ZIP too, resolved and checked the same way (phone_pins.py --package).
 # --wire-log: build the addon with the passive channel recorder (TIO_WIRE_LOG=1).
 # --build-only: build and check the addon as a package run would, then stop before
@@ -120,6 +120,8 @@ firmware=''
 stock_label=''
 stock_firmware=''
 stock_args=()
+external_label=''
+external_firmware=''
 # Without --release, the build is the only release in releases.json; with several, --release is required.
 # Every addon carries one release block (FirmwarePins.h), the download-only builds too, so the name is always known.
 explicit_release=$release
@@ -147,6 +149,13 @@ print(next((p["label"] for p in r["packages"][1:] if p["label"]=="STOCK-"+r["sto
   if [[ -n $stock_label ]]; then
     stock_firmware=$(python3 -I "$REPO/firmware/tools/phone_pins.py" --resolve "$release" --package "$stock_label" --inputs "$TURBO_INPUTS") || { echo "PACKAGE FAIL: no checked ZIP for package $stock_label of release $release" >&2; exit 1; }
     stock_args=(--stock-firmware "$stock_firmware")
+  fi
+  external_label=$(python3 -I -c 'import json,sys
+r=json.load(open(sys.argv[1]))["releases"][sys.argv[2]]
+print(next((p["label"] for p in r["packages"][2:]),""))' "$ED/releases.json" "$release") || { echo 'PACKAGE FAIL: cannot read external package' >&2; exit 1; }
+  if [[ -n $external_label ]]; then
+    external_firmware=$(python3 -I "$REPO/firmware/tools/phone_pins.py" --resolve "$release" --package "$external_label" --inputs "$TURBO_INPUTS") || { echo 'PACKAGE FAIL: no checked external ZIP' >&2; exit 1; }
+    stock_args+=(--external-firmware "$external_firmware")
   fi
 fi
 # Every package run builds the addon itself, for both hosts, so a dylib left over
@@ -180,6 +189,7 @@ addon_check() {
   grep -a -o "ota release=$want; [^\"]*target Strix OS [0-9.]*" "$ADDON" | head -n 1 >&2
   # A release with a stock package names it in the same marker.
   [[ -z $stock_label ]] || grep -aFq "; package=$stock_label; zip=" "$ADDON" || { echo "addon does not carry package $stock_label" >&2; return 1; }
+  [[ -z $external_label ]] || grep -aFq "; package=$external_label; zip=" "$ADDON" || { echo "addon does not carry package $external_label" >&2; return 1; }
   shasum -a 256 "$ADDON" | cut -d' ' -f1
 }
 run_logged addon-check addon_check
@@ -232,6 +242,7 @@ if [[ $host == 1021 ]]; then
 else
   [[ -f "$TURBO_PROFILE" && -f "$firmware" && -d "$TURBO_APP1021" ]] || { echo 'PACKAGE FAIL: missing configured input' >&2; exit 1; }
   [[ -z $stock_label || -f "$stock_firmware" ]] || { echo 'PACKAGE FAIL: missing configured input' >&2; exit 1; }
+  [[ -z $external_label || -f "$external_firmware" ]] || { echo 'PACKAGE FAIL: missing external input' >&2; exit 1; }
 fi
 OUT=$TURBO_INPUTS/signed-$(date +%Y%m%d-%H%M)-$label
 [[ ! -e "$OUT" && ! -L "$OUT" ]] || { echo 'PACKAGE FAIL: output already exists' >&2; exit 1; }
@@ -263,13 +274,13 @@ info=plistlib.loads((app/'Info.plist').read_bytes())
 assert info.get('TIOHostProfile')=='ios1021-download', 'missing host profile marker'
 for key in ('TIOExperimentalOTABuild','UISupportedDevices'):
     assert key not in info, 'unexpected '+key
-assert not (app/'TurboWeReadCandidate.zip').exists() and not (app/'TurboStockFirmware.zip').exists(), 'unexpected firmware resource'
+assert not (app/'TurboWeReadCandidate.zip').exists() and not (app/'TurboStockFirmware.zip').exists() and not (app/'TurboExternalFirmware.zip').exists(), 'unexpected firmware resource'
 digest=hashlib.sha256((out/'TurboIO-local-only.ipa').read_bytes()).hexdigest()
 assert report['ipaSHA256']==digest, 'IPA digest mismatch'
 print(digest)
 PY
 else
-# The full 1.0.21 host (C21): its own package.mjs profile, guard and markers.
+# The full 1.0.21 host (C22): its own package.mjs profile, guard and markers.
 full_profile=ios1021
 # Fail closed unless the addon carries this host's gate and guard (package.mjs repeats this check).
 run_logged full-1021-guard full_1021_guard "$ADDON"

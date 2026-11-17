@@ -11,21 +11,25 @@ There are no prebuilt or signed apps here. You merge, sign and install the addon
 
 <a id="ios107-update"></a>
 
-## Current release: C21 + TMG12
+## Current release: C22 + TMG12
 
-Always use the phone build and the firmware as a pair. C21 carries two packages, and you pick one in its flash wizard: TMG12, or stock Strix OS 1.0.6.11 to go back.
+Always use the phone build and the firmware as a pair. C22 carries three packages in its flash wizard: TMG12 (default), stock Strix OS 1.0.6.11 (the way back), and third-party Turbo-IO TMIG2-VIDEO-R1 (R1). TMG12 and Stock accept glasses on 1.0.5.12 or 1.0.6.11; R1 accepts only 1.0.6.11.
 
 | | |
 |---|---|
-| Phone build | C21: RayNeo AI 1.0.21 (1), full build |
+| Phone build | C22: RayNeo AI 1.0.21 (1), full build |
 | Firmware | TMG12: TMG11 ported to stock Strix OS 1.0.6.11 |
 | TMG12 ZIP | `StrixOS-1.0.6.11-TurboIO-TMG12-CANDIDATE-NOT-APPROVED.zip`, 9,549,211 bytes |
 | TMG12 ZIP SHA-256 | `3abc73ffff78d890a49a0c148c64eef6a8577458bb0d759fca1b032bc031e373` |
 | Stock ZIP SHA-256 | `5821506f720a43a9a3aea9c5722a1548463dcf1cbedcb2d97a242e2a64037d6e` (9,447,267 bytes) |
-| Glasses must report | Strix OS 1.0.5.12 or 1.0.6.11 |
+| R1 ZIP | `TMIG2-VIDEO-R1-1.0.6.11-lab.zip`, 9,589,819 bytes |
+| R1 ZIP SHA-256 | `c03321061605aba186b44e7b90d86d3b13a2f75e081687fc684680e2800a4e8a` |
+| Glasses must report | TMG12 / Stock: 1.0.5.12 or 1.0.6.11; R1: 1.0.6.11 only |
 | Build identity after a TMG12 flash | `0f43c519fc964dc4bd578cf9d7193e502b5c5daa17f3061fba26ccec0280fc55` |
 
-TMG12 was flashed from C20 on 2026-11-15 and passed the owner's first check (tags `app/c20` and `fw/tmg12`). C21 was installed on 2026-11-16 (tag `app/c21`) and has not flashed anything yet. No full device checklist has been run yet. The pins are the `c21` entry in [releases.json](ios-addon/releases.json).
+TMG12 was flashed from C20 on 2026-11-15 and passed the owner's first check (tags `app/c20` and `fw/tmg12`). C21 was installed on 2026-11-16 (tag `app/c21`) and has not flashed anything yet. C22 has not been installed or used to flash anything. No full device checklist has been run yet. The pins are the `c22` entry in [releases.json](ios-addon/releases.json).
+
+R1 is a [third-party Turbo-IO build](https://github.com/Turbo1123/Turbo-IO/releases/tag/strix-10611-tmig2-video-r1). It has never been flashed from C22 or, as far as its publisher reports, on any real glasses (the publisher reports a flash of the earlier base TMIG2). This fork's Turbo phone features are built for TMG12 and are not expected to work on R1. The “Firmware and build” identity check above applies only to TMG12. Stock 1.0.6.11 remains the way back from R1.
 
 To flash, follow [OTA.md](ios-addon/OTA.md). Flash only these ZIPs, and only if the SHA-256 matches the line above.
 
@@ -35,6 +39,7 @@ Each release is an annotated git tag. Run `git show <tag>` to see its ZIP SHA-25
 
 | Phone | Firmware | RayNeo AI host | Stock Strix OS | Tags |
 |---|---|---|---|---|
+| C21 | TMG12 / Stock 1.0.6.11 | 1.0.21 (1) | 1.0.6.11 | `app/c21` |
 | C20 | TMG12 | 1.0.21 (1) | 1.0.6.11 | `app/c20`, `fw/tmg12` |
 | C18 | TMG11 | 1.0.11 (259) | 1.0.5.12 | `app/c18`, `fw/tmg11` |
 | C16 | TMG10 | 1.0.11 (259) | 1.0.5.12 | `app/c16`, `fw/tmg10` |
@@ -60,7 +65,7 @@ You need your own decrypted copy of RayNeo AI 1.0.21 (1), your own signing setup
 
 1. Run the quick check: `bash scripts/turbo-gate.sh --only-build`
 2. Run the full check: `bash scripts/turbo-gate.sh`
-3. Build and sign C21: `bash scripts/turbo-package.sh --host 1021-full --wire-log <label>`
+3. Build and sign C22: `bash scripts/turbo-package.sh --host 1021-full --wire-log <label>`
 4. Install the IPA over the existing app yourself. Then flash with [OTA.md](ios-addon/OTA.md).
 
 The stock app inputs this project has published (1.0.7 and older) are listed in [official-apps](official-apps/README.md). They contain no Turbo IO code.
@@ -77,7 +82,7 @@ Copy this prompt:
 Help me build Turbo IO from this repository, for personal non-commercial use.
 Read README.md, AGENTS.md and docs/AI_SETUP.md first.
 Check my tools and any uncommitted changes. Do not overwrite or reset anything.
-Use the repo's own scripts: run scripts/turbo-gate.sh, then build C21 with scripts/turbo-package.sh --host 1021-full --wire-log.
+Use the repo's own scripts: run scripts/turbo-gate.sh, then build C22 with scripts/turbo-package.sh --host 1021-full --wire-log.
 If an input does not match its pinned version or hash, stop and tell me what is missing. Never change a check to get past it.
 Do not install the app, flash the glasses or delete any app. I do those myself.
 I enter keys and signing passwords myself. Never ask for them in chat, and never commit them.

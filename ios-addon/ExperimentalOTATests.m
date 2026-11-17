@@ -3,9 +3,9 @@
 #import "TIOLanguage.h"
 #include <assert.h>
 int main(int argc,const char **argv){@autoreleasepool{
-    assert(argc==3);NSURL *source=[NSURL fileURLWithPath:[NSString stringWithUTF8String:argv[1]]];NSError *error=nil;
+    assert(argc==4);NSURL *source=[NSURL fileURLWithPath:[NSString stringWithUTF8String:argv[1]]];NSError *error=nil;
     // The release's packages: the TMG build first (the default), then the stock package of its base.
-    assert(TIOOTAPackageCount()==2);NSDictionary *tmg=TIOOTAPackageAt(0),*stock=TIOOTAPackageAt(1);assert(tmg&&stock&&!TIOOTAPackageAt(2));
+    assert(TIOOTAPackageCount()==3);NSDictionary *tmg=TIOOTAPackageAt(0),*stock=TIOOTAPackageAt(1);assert(tmg&&stock&&!TIOOTAPackageAt(3));
     assert([tmg[@"kind"] isEqual:@"TMG"]&&[stock[@"kind"] isEqual:@"STOCK"]&&[stock[@"name"] isEqual:[@"STOCK-" stringByAppendingString:TIO_FW_BASE]]);
     NSString *stockName=[NSString stringWithFormat:TIOText(@"ota.package.stockName"),TIO_FW_BASE];
     assert([TIOOTAPackageDisplayName(stock) isEqual:stockName]&&[TIOOTAPackageDisplayName(tmg) isEqual:tmg[@"name"]]);
@@ -36,7 +36,15 @@ int main(int argc,const char **argv){@autoreleasepool{
     assert(!TIOImportExperimentalOTA(source,store,stock,nil));error=nil;assert(TIOImportExperimentalOTA(stockSource,store,stock,&error)&&!error);
     NSURL *stockSaved=[store URLByAppendingPathComponent:TIOOTAPackageArchiveName(stock)];assert([[NSData dataWithContentsOfURL:stockSaved] isEqual:stockData]&&[[NSData dataWithContentsOfURL:saved] isEqual:data]);
     assert([bad writeToURL:saved atomically:NO]);assert(!TIOImportExperimentalOTA(source,store,tmg,&error));assert([[NSData dataWithContentsOfURL:saved] isEqual:bad]);
+    NSDictionary *r1=TIOOTAPackageAt(2);assert([r1[@"kind"] isEqual:@"EXTERNAL"]&&[r1[@"name"] isEqual:@"TMIG2-VIDEO-R1"]&&[r1[@"resource"] isEqual:@"TurboExternalFirmware.zip"]);
+    NSData *r1Data=[NSData dataWithContentsOfFile:@(argv[3])];assert(r1Data);
+    NSDictionary *r1OK=TIOCheckExperimentalOTA(r1Data,r1,nil);assert(r1OK&&[r1OK[@"candidate"] isEqual:@"TMIG2-VIDEO-R1"]);
+    assert(!TIOCheckExperimentalOTA(r1Data,tmg,nil)&&!TIOCheckExperimentalOTA(r1Data,stock,nil)&&!TIOCheckExperimentalOTA(data,r1,nil)&&!TIOCheckExperimentalOTA(stockData,r1,nil));
+    NSMutableData *r1Bad=[r1Data mutableCopy];((uint8_t *)r1Bad.mutableBytes)[100]^=1;assert(!TIOCheckExperimentalOTA(r1Bad,r1,nil));
+    NSMutableDictionary *unknown=[r1 mutableCopy];unknown[@"name"]=@"TMIG2-VIDEO-R2";assert(!TIOCheckExperimentalOTA(r1Data,unknown,nil));
+    NSURL *r1Source=[NSURL fileURLWithPath:@(argv[3])];assert(TIOImportExperimentalOTA(r1Source,store,r1,nil));
+    assert(TIOReadExperimentalOTA([store URLByAppendingPathComponent:TIOOTAPackageArchiveName(r1)],r1,nil));
     // Deletes only this test's UUID-named temporary directory.
     assert([fm removeItemAtURL:root error:nil]);
-    NSLog(@"PASS: two packages (TMG default, stock second), each ZIP only under its own package, pinned candidate, invalid rejection, isolated copy, idempotence, corrupt existing copy preserved; no device IO");
+    NSLog(@"PASS: three packages (TMG default, stock second, external R1 third), each ZIP only under its own package, pinned candidate, invalid rejection, isolated copy, idempotence, corrupt existing copy preserved; no device IO");
 }return 0;}
