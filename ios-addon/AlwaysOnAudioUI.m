@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import "HostBundle.h"
 #import "TIOLanguage.h"
 #import "ResearchUI.h"
 #import "TIOConfirm.h"
@@ -40,5 +41,5 @@ static void AudioSelect(id self,SEL cmd,UITableView *t,NSIndexPath *ip){if(ip.se
 static void AudioMarker(id self,SEL cmd){}
 void TIOInstallAlwaysOnAudioMenu(void){Class cls=NSClassFromString(@"TIOLifelogExportsPanel");SEL marker=NSSelectorFromString(@"tio_alwaysOnAudioMenuV1");if(!cls||class_getInstanceMethod(cls,marker))return;Method cell=class_getInstanceMethod(cls,@selector(tableView:cellForRowAtIndexPath:)),footer=class_getInstanceMethod(cls,@selector(tableView:titleForFooterInSection:)),select=class_getInstanceMethod(cls,@selector(tableView:didSelectRowAtIndexPath:));if(!cell||!footer||!select)return;if(!class_addMethod(cls,marker,(IMP)AudioMarker,"v@:"))return;AudioPriorCell=(void *)method_setImplementation(cell,(IMP)AudioCell);AudioPriorFooter=(void *)method_setImplementation(footer,(IMP)AudioFooter);AudioPriorSelect=(void *)method_setImplementation(select,(IMP)AudioSelect);}
 #ifdef TIO_AO_AUDIO_HOTLOAD
-__attribute__((constructor))static void AudioInstall(void){dispatch_async(dispatch_get_main_queue(),^{if([NSBundle.mainBundle.bundleIdentifier isEqual:@"com.rayneo.venus.pub"]&&[[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"] isEqual:@"67"])TIOInstallAlwaysOnAudioMenu();});}
+__attribute__((constructor))static void AudioInstall(void){dispatch_async(dispatch_get_main_queue(),^{if([NSBundle.mainBundle.bundleIdentifier isEqual:@TIO_TARGET_BUNDLE_ID]&&[[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"] isEqual:@"67"])TIOInstallAlwaysOnAudioMenu();});}
 #endif

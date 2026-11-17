@@ -4,6 +4,14 @@
 
 This guide flashes firmware onto the RayNeo iO glasses from the Turbo phone build, through RayNeo's own updater. You do every step yourself, on your own iPhone. Agents never install the app or flash the glasses. Flashing is high risk: a bad flash can leave the glasses unusable, and recovery is not guaranteed.
 
+### Personal Team fallback on a phone without RayNeo
+
+A free personal Apple ID may be unable to provision `com.rayneo.venus.pub`. The optional `TURBO_BUNDLE=com.rayneo.venus.pub.<suffix>` in the external `package.env` selects an identifier your team can register (1–24 lowercase ASCII letters or digits after the final dot). Supply a development profile for that exact ID. The wrapper also accepts `--bundle <bundle-id>`. Omit the setting for the standard build. Free profiles expire after 7 days and need renewal, rebuilding and reinstalling.
+
+The alternate app installs beside the App Store app, with its own data, pairing and flash gate state. It shows `RayNeo AI [ALT <suffix>]` on the home screen and `[ALT]` in the Turbo panel. Never delete an existing RayNeo app to make room for this fallback. Installing on a borrowed phone or beside an existing app requires Joey's explicit exception to the normal install-over-existing-app rule. Agents have no permission to install it or access the phone from this documentation.
+
+Push and Sign in with Apple are expected to be lost; associated domains and iCloud are unavailable on a Personal Team. Other behavior tied to the bundle ID by RayNeo servers or third-party SDKs is unknown. Pairing and RayNeo login under the alternate ID are untested. Existing URL schemes are retained and may conflict between the two apps. `PlugIns`, `Watch` and `AppClips` are omitted rather than shipped with mismatched profiles; the report names any removed directories. The current pinned host has none. The stock input pins, route patch, firmware hashes, download-only refusal and one-flash authorization gate remain exact. Packaging and installing never authorize a flash.
+
 ## Current build: C22
 
 C22 carries three firmware packages. TMG12 stays the default; R1 is an explicit third choice. You pick one in the wizard.

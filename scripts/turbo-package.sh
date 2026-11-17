@@ -24,9 +24,11 @@ host=''
 release=''
 wire_log=0
 build_only=0
-usage='Usage: turbo-package.sh --host 1021|1021-full [--apple-ai <new-directory>] [--release cN] [--wire-log] [--build-only] <label>'
+bundle_arg=''
+usage='Usage: turbo-package.sh --host 1021|1021-full [--bundle <bundle-id>] [--apple-ai <new-directory>] [--release cN] [--wire-log] [--build-only] <label>'
 while [[ $# -gt 1 ]]; do
   case "$1" in
+    --bundle) [[ -n ${2:-} && -z $bundle_arg ]] || { echo "$usage" >&2; exit 2; }; bundle_arg=$2; shift 2 ;;
     --apple-ai) [[ -n ${2:-} && -z $apple_ai_out ]] || { echo "$usage" >&2; exit 2; }; apple_ai_out=$2; shift 2 ;;
     --host)
       [[ -z $host ]] || { echo "$usage" >&2; exit 2; }
@@ -109,6 +111,8 @@ unset TURBO_PROFILE TURBO_SIGN_ID TURBO_DEVICE TURBO_APP1021
 set -a
 source "$TURBO_INPUTS/package.env"
 set +a
+bundle=${bundle_arg:-${TURBO_BUNDLE-com.rayneo.venus.pub}}
+[[ $bundle =~ ^com\.rayneo\.venus\.pub(\.[a-z0-9]{1,24})?$ ]] || { echo 'PACKAGE FAIL: invalid bundle ID' >&2; exit 2; }
 # Build flags come only from the options below, never from the caller's environment
 # or package.env: the addon build also runs in an emptied environment (env -i).
 for name in $(compgen -e); do [[ $name != TIO_* ]] || unset "$name"; done
@@ -173,7 +177,7 @@ ADDON=$ED/build/mapkit/TurboIOPrivateAddon.dylib
 rm -f "$ADDON"
 [[ ! -e "$ADDON" ]] || { echo 'PACKAGE FAIL: cannot remove the previous addon build' >&2; exit 1; }
 printf '%s\n' "${build_flags[@]}" >"$LOG_DIR/addon-flags.txt"
-run_logged addon-build env -i PATH="$PATH" HOME="$HOME" ${DEVELOPER_DIR:+DEVELOPER_DIR="$DEVELOPER_DIR"} "${build_flags[@]}" bash "$ED/build.sh" embedded com.rayneo.venus.pub
+run_logged addon-build env -i PATH="$PATH" HOME="$HOME" ${DEVELOPER_DIR:+DEVELOPER_DIR="$DEVELOPER_DIR"} "${build_flags[@]}" bash "$ED/build.sh" embedded "$bundle"
 [[ -f "$ADDON" ]] || { echo 'PACKAGE FAIL: the addon was not built in this run' >&2; exit 1; }
 addon_check() {
   local symbols
@@ -259,10 +263,10 @@ run_logged download-only-guard download_only_guard "$ADDON"
 run_logged addon-unchanged addon_unchanged
 run_logged package node "$ED/package.mjs" --host "$pkg_host" --app "$pkg_app" --addon "$ADDON" \
   --profile "$TURBO_PROFILE" --identity "$TURBO_SIGN_ID" --device "$TURBO_DEVICE" \
-  --out "$OUT" --bundle com.rayneo.venus.pub ${apple_args[@]+"${apple_args[@]}"}
+  --out "$OUT" --bundle "$bundle" ${apple_args[@]+"${apple_args[@]}"}
 run_logged codesign codesign --verify --deep --strict "$OUT/Payload/Runner.app"
 run_logged unzip unzip -tq "$OUT/TurboIO-local-only.ipa"
-run_logged report python3 - "$OUT" <<'PY'
+run_logged report python3 - "$OUT" "$bundle" <<'PY'
 import hashlib,json,pathlib,plistlib,sys
 out=pathlib.Path(sys.argv[1])
 with (out/'report.json').open() as stream: report=json.load(stream)
@@ -271,6 +275,10 @@ assert report['hostProfile']=='ios1021-download' and report['flashAuthorized'] i
 assert report['firmwareBundled'] is False and report['routePatched'] is False and report['experimentalOTA'] is False, 'download-only build carries OTA material'
 app=out/'Payload/Runner.app'
 info=plistlib.loads((app/'Info.plist').read_bytes())
+assert info['CFBundleIdentifier']==sys.argv[2], 'output bundle mismatch'
+if sys.argv[2]!='com.rayneo.venus.pub':
+    assert report['bundleID']==sys.argv[2] and info['TIOAlternateBundle']==sys.argv[2], 'alternate bundle mismatch'
+    assert all(not (app/name).exists() for name in ('PlugIns','Watch','AppClips')), 'nested bundle requires another profile'
 assert info.get('TIOHostProfile')=='ios1021-download', 'missing host profile marker'
 for key in ('TIOExperimentalOTABuild','UISupportedDevices'):
     assert key not in info, 'unexpected '+key
@@ -288,10 +296,10 @@ run_logged full-1021-guard full_1021_guard "$ADDON"
 run_logged addon-unchanged addon_unchanged
 run_logged package node "$ED/package.mjs" --host "$full_profile" --app "$TURBO_APP1021" --addon "$ADDON" \
   --profile "$TURBO_PROFILE" --identity "$TURBO_SIGN_ID" --device "$TURBO_DEVICE" \
-  --out "$OUT" --bundle com.rayneo.venus.pub --firmware "$firmware" --release "$release" ${stock_args[@]+"${stock_args[@]}"} ${apple_args[@]+"${apple_args[@]}"}
+  --out "$OUT" --bundle "$bundle" --firmware "$firmware" --release "$release" ${stock_args[@]+"${stock_args[@]}"} ${apple_args[@]+"${apple_args[@]}"}
 run_logged codesign codesign --verify --deep --strict "$OUT/Payload/Runner.app"
 run_logged unzip unzip -tq "$OUT/TurboIO-local-only.ipa"
-run_logged report python3 - "$OUT" "$release" "$ED" "$full_profile" <<'PY'
+run_logged report python3 - "$OUT" "$release" "$ED" "$full_profile" "$bundle" <<'PY'
 import hashlib,json,pathlib,plistlib,sys,zipfile
 out=pathlib.Path(sys.argv[1])
 profile=sys.argv[4]
@@ -303,6 +311,10 @@ assert report['hostProfile']==profile and report['flashAuthorized'] is False, 'u
 assert report['routePatched'] is True and report['firmwareBundled'] is True, 'full host build lacks its route patch or ZIP'
 app=out/'Payload/Runner.app'
 info=plistlib.loads((app/'Info.plist').read_bytes())
+assert info['CFBundleIdentifier']==sys.argv[5], 'output bundle mismatch'
+if sys.argv[5]!='com.rayneo.venus.pub':
+    assert report['bundleID']==sys.argv[5] and info['TIOAlternateBundle']==sys.argv[5], 'alternate bundle mismatch'
+    assert all(not (app/name).exists() for name in ('PlugIns','Watch','AppClips')), 'nested bundle requires another profile'
 assert info.get('TIOHostProfile')==profile, 'missing full host profile marker'
 assert 'UISupportedDevices' not in info, 'unexpected UISupportedDevices'
 assert (app/'TurboWeReadCandidate.zip').exists(), 'missing firmware resource'

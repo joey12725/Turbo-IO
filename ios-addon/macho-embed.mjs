@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {inspectedHost} from './host-compatibility.mjs';
+import {STOCK_BUNDLE,validateBundle,validateAddonBundle} from './host-bundle.mjs';
 
 export function inspectMachO(bytes) {
   if(bytes.length<32||bytes.readUInt32LE(0)!==0xfeedfacf||bytes.readUInt32LE(4)!==0x100000c)throw Error('Expected thin arm64 Mach-O');
@@ -77,7 +78,8 @@ function prepare() {
   const strip=process.argv.length===7&&mode==='--strip-stale-signature';
   if(!sourceArg||!outArg||!addonArg||!bundle||(process.argv.length!==6&&!strip))throw Error('Usage: node macho-embed.mjs /absolute/Runner.app /absolute/new/Runner.app /absolute/embedded/TurboIOPrivateAddon.dylib your.bundle.id [--strip-stale-signature]');
   if(![sourceArg,outArg,addonArg].every(path.isAbsolute)||![sourceArg,outArg].every(x=>x.endsWith('.app')))throw Error('Use absolute app and addon paths');
-  if(!/^[A-Za-z0-9][A-Za-z0-9.-]+\.[A-Za-z0-9.-]+$/.test(bundle))throw Error('Invalid explicit Bundle ID');
+  validateBundle(bundle);
+  const alternate=bundle!==STOCK_BUNDLE;
   const source=fs.realpathSync(sourceArg),out=path.resolve(outArg),addon=fs.realpathSync(addonArg);
   if(out===source||out.startsWith(source+path.sep)||fs.existsSync(out))throw Error('Output must be a new separate app directory');
   const plist=p=>JSON.parse(execFileSync('plutil',['-convert','json','-o','-',p],{encoding:'utf8'}));
@@ -88,21 +90,42 @@ function prepare() {
   if(!!host.staleSignature!==strip)throw Error('Hosts with a stale input signature, and only they, require --strip-stale-signature');
   const embedded=fs.readFileSync(addon),addonInfo=inspectMachO(embedded);
   if(addonInfo.fileType!==6||addonInfo.installName!=='@rpath/TurboIOPrivateAddon.dylib'||addonInfo.encrypted||addonInfo.dependencies.some(x=>/\/var\/jb\/|frida|ellekit|substrate/i.test(x)))throw Error('Use the embedded addon build, with no jailbreak runtime dependency');
-  if(!embedded.includes(Buffer.from(bundle+'\0')))throw Error('Build addon for exactly the requested Bundle ID');
+  validateAddonBundle(embedded,bundle);
   const unsigned=strip?stripCodeSignature(original).output:original;
   const patched=addEmbeddedLoad(unsigned),inventory=[];
-  function walk(dir){for(const name of fs.readdirSync(dir)){const p=path.join(dir,name),st=fs.lstatSync(p);if(st.isSymbolicLink())throw Error('Review bundle symlinks before preparing');if(st.isDirectory()){if(name==='PlugIns')throw Error('Source has app extensions; separate signing/entitlement review required');walk(p);}else {const b=fs.readFileSync(p);if(b.length>=4&&[0xcafebabe,0xbebafeca,0xcafebabf,0xbfbafeca].includes(b.readUInt32BE(0)))throw Error('Fat Mach-O needs slice-by-slice review before preparing');if(b.length>=4&&b.readUInt32LE(0)===0xfeedfacf){const h=inspectMachO(b);if(h.encrypted)throw Error('Encrypted embedded image: '+path.relative(source,p));inventory.push(path.relative(source,p));}}}}
+  const removed=[];
+  function walk(dir){for(const name of fs.readdirSync(dir)){const p=path.join(dir,name),st=fs.lstatSync(p);if(st.isSymbolicLink())throw Error('Review bundle symlinks before preparing');if(st.isDirectory()){
+    // A single app profile cannot provision independent extension, Watch or App Clip identifiers.
+    if(alternate&&dir===source&&['PlugIns','Watch','AppClips'].includes(name)){removed.push(name);continue;}
+    if(name==='PlugIns')throw Error('Source has app extensions; separate signing/entitlement review required');
+    if(alternate&&/\.(appex|app)$/.test(name))throw Error('Nested app requires its own provisioning profile');
+    walk(p);
+  }else {const b=fs.readFileSync(p);if(b.length>=4&&[0xcafebabe,0xbebafeca,0xcafebabf,0xbfbafeca].includes(b.readUInt32BE(0)))throw Error('Fat Mach-O needs slice-by-slice review before preparing');if(b.length>=4&&b.readUInt32LE(0)===0xfeedfacf){const h=inspectMachO(b);if(h.encrypted)throw Error('Encrypted embedded image: '+path.relative(source,p));inventory.push(path.relative(source,p));}}}}
   walk(source); // Complete preflight before creating any output.
-  fs.mkdirSync(path.dirname(out),{recursive:true});fs.cpSync(source,out,{recursive:true,force:false,errorOnExist:true,dereference:false});
+  fs.mkdirSync(path.dirname(out),{recursive:true});fs.cpSync(source,out,{recursive:true,force:false,errorOnExist:true,dereference:false,...(alternate?{filter:p=>!removed.includes(path.relative(source,p).split(path.sep)[0])}:{})});
   fs.writeFileSync(path.join(out,'Runner'),patched);
   if(strip)fs.rmSync(path.join(out,'_CodeSignature'),{recursive:true,force:true}); // the app's own stale seal; nested frameworks are re-signed with --force
   fs.mkdirSync(path.join(out,'Frameworks'),{recursive:true});fs.copyFileSync(addon,path.join(out,'Frameworks/TurboIOPrivateAddon.dylib'),fs.constants.COPYFILE_EXCL);
   execFileSync('plutil',['-replace','CFBundleIdentifier','-string',bundle,path.join(out,'Info.plist')]);
   if(plist(path.join(out,'Info.plist')).CFBundleIdentifier!==bundle)throw Error('Bundle ID update failed');
+  if(alternate){
+    const file=path.join(out,'Info.plist');
+    execFileSync('plutil',['-insert','TIOAlternateBundle','-string',bundle,file]);
+    execFileSync('plutil',[Object.hasOwn(info,'CFBundleDisplayName')?'-replace':'-insert','CFBundleDisplayName','-string',`RayNeo AI [ALT ${bundle.slice(STOCK_BUNDLE.length+1)}]`,file]);
+    // Localized display names take precedence on the home screen.
+    for(const entry of fs.readdirSync(out,{withFileTypes:true}))if(entry.isDirectory()&&entry.name.endsWith('.lproj')){
+      const localized=path.join(out,entry.name,'InfoPlist.strings');
+      if(fs.existsSync(localized)){
+        const values=plist(localized);
+        execFileSync('plutil',[Object.hasOwn(values,'CFBundleDisplayName')?'-replace':'-insert','CFBundleDisplayName','-string',`RayNeo AI [ALT ${bundle.slice(STOCK_BUNDLE.length+1)}]`,localized]);
+      }
+    }
+  }
   const hash=b=>createHash('sha256').update(b).digest('hex');
   const report={status:'PREPARED_ONLY_NOT_SIGNED_NOT_INSTALLABLE',originalExecutableSHA256:hash(original),preparedExecutableSHA256:hash(patched),addonSHA256:hash(embedded),binaryCount:inventory.length,uuid:header.uuid,sourcePreserved:hash(fs.readFileSync(exe))===hash(original),requires:['matching developer provisioning profile','review entitlements for every nested code bundle','sign nested code then app','non-jailbroken hardware acceptance']};
   // The image only: which addon profile runs is the packager's TIOHostProfile marker.
   if(strip)Object.assign(report,{hostImage:`${host.version}/${host.build}`,staleSignatureRemoved:true,unsignedExecutableSHA256:hash(unsigned)});
+  if(alternate)Object.assign(report,{bundleID:bundle,alternateBundle:true,removedNestedBundles:removed,extensionPolicy:'PlugIns, Watch and AppClips removed: one app provisioning profile cannot cover their identifiers.'});
   fs.writeFileSync(path.join(out,'TurboIOPrivatePreparation.json'),JSON.stringify(report,null,2)+'\n',{flag:'wx',mode:0o600});
   console.log(JSON.stringify(report,null,2));
 }

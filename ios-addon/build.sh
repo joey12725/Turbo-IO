@@ -3,8 +3,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p build
 mode=${1:-embedded}
-bundle=${2:-com.rayneo.venus.pub}
-if [[ ! "$bundle" =~ ^[A-Za-z0-9][A-Za-z0-9.-]+\.[A-Za-z0-9.-]+$ ]]; then
+bundle=${2-${TURBO_BUNDLE-com.rayneo.venus.pub}}
+if [[ ! "$bundle" =~ ^com\.rayneo\.venus\.pub(\.[a-z0-9]{1,24})?$ ]]; then
   echo 'Invalid explicit target Bundle ID' >&2; exit 2
 fi
 case "$mode" in
@@ -12,6 +12,7 @@ case "$mode" in
   embedded) output=build/embedded/TurboIOPrivateAddon.dylib; install_name=@rpath/TurboIOPrivateAddon.dylib; mkdir -p build/embedded ;;
   *) echo 'Usage: build.sh [jailbreak|embedded] [target.bundle.id]' >&2; exit 2 ;;
 esac
+[[ $bundle == com.rayneo.venus.pub || $mode == embedded ]] || { echo 'Alternate bundle ID requires embedded mode' >&2; exit 2; }
 [[ ${TIO_DEV:-0} != 1 ]] || export TIO_IMAGE_RX_LAB=1
 [[ ${TIO_MAPKIT_ENABLED:-0} != 1 ]] || export TIO_DISPLAY_PHONE=1
 diag=${TIO_DEV:-${TIO_IMAGE_RX_LAB:-0}}
@@ -19,6 +20,7 @@ diag=${TIO_DEV:-${TIO_IMAGE_RX_LAB:-0}}
 nav_options=()
 sdk_path=$(xcrun --sdk iphoneos --show-sdk-path)
 link_options=()
+if [[ $bundle != com.rayneo.venus.pub ]]; then link_options+=(-DTIO_ALTERNATE_BUNDLE=1); fi
 if [[ ${TIO_OTA_FLASH_ENABLED:-0} == 1 ]]; then
   [[ "$mode" == embedded ]] || { echo 'Flash gate requires separate embedded build' >&2; exit 2; }
   link_options+=(-DTIO_OTA_FLASH_ENABLED=1 -DTIO_OTA_FEED_ARMING_ENABLED=1)

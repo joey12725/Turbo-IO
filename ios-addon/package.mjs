@@ -9,6 +9,7 @@ import {validateTranslationPair,prepareTranslationResources,copyTranslationResou
 import {prepareAppleAI,copyAppleAI} from './apple-ai/package-resources.mjs';
 import {inspectMachO,stripCodeSignature} from './macho-embed.mjs';
 import {patch as patchOTARoute,verifyRoute,routeProfile} from './patch-route.mjs';
+import {STOCK_BUNDLE,validateBundle,validateAddonBundle} from './host-bundle.mjs';
 export const CANDIDATE_RESOURCE='TurboWeReadCandidate.zip';
 // The second package of a release, the stock ZIP of its base, has its own fixed resource name beside the TMG one.
 export const STOCK_RESOURCE='TurboStockFirmware.zip';
@@ -196,11 +197,11 @@ export function validateOptions(o) {
   for(const k of ['app','addon','profile','out'])if(typeof o[k]!=='string'||!path.isAbsolute(o[k]))throw Error('absolute_paths_required');
   if(!o.app.endsWith('.app')||o.out.endsWith('.app'))throw Error('use_app_input_and_new_output_directory');
   if(!/^[a-f0-9]{40}$/i.test(o.identity||'')||!/^[a-z0-9-]{8,80}$/i.test(o.device||''))throw Error('explicit_identity_and_device_required');
-  if(!/^[A-Za-z0-9][A-Za-z0-9.-]+\.[A-Za-z0-9.-]+$/.test(o.bundle||''))throw Error('invalid_bundle');
+  validateBundle(o.bundle);
   if(fs.existsSync(o.out))throw Error('output_must_not_exist');
   if(!host.firmware){
     // Download-only: nothing to flash, no TMG candidate, no device-model injection.
-    if(o.bundle!=='com.rayneo.venus.pub'||o.firmware!==undefined||o['stock-firmware']!==undefined||o['external-firmware']!==undefined||o['experimental-ota']!==undefined||o.product!==undefined)throw Error('download_only_host_takes_no_firmware_or_product');
+    if(o.firmware!==undefined||o['stock-firmware']!==undefined||o['external-firmware']!==undefined||o['experimental-ota']!==undefined||o.product!==undefined)throw Error('download_only_host_takes_no_firmware_or_product');
     return;
   }
   if(host.noProduct&&o.product!==undefined)throw Error('full_host_takes_no_product');
@@ -208,7 +209,7 @@ export function validateOptions(o) {
   if(!releaseHosts(o.release).includes(RELEASE_HOST_NAMES[host.name]))throw Error('release_not_built_for_host');
   const release=releasePins(o.release);
   if(o['experimental-ota']!==undefined&&o['experimental-ota']!==release.name)throw Error('only_exact_'+release.name.toLowerCase()+'_supported');
-  if(o.bundle!=='com.rayneo.venus.pub'||typeof o.firmware!=='string'||!path.isAbsolute(o.firmware))throw Error('exact_host_and_firmware_resource_required');
+  if(typeof o.firmware!=='string'||!path.isAbsolute(o.firmware))throw Error('exact_host_and_firmware_resource_required');
   // A release with a stock package bundles its ZIP too (--stock-firmware); one without takes none.
   if(stockPackage(release)?(typeof o['stock-firmware']!=='string'||!path.isAbsolute(o['stock-firmware'])):o['stock-firmware']!==undefined)throw Error('stock_firmware_resource_required');
   if(externalPackage(release)?(typeof o['external-firmware']!=='string'||!path.isAbsolute(o['external-firmware'])):o['external-firmware']!==undefined)throw Error('external_firmware_resource_required');
@@ -275,6 +276,15 @@ export function entitlementsFor(p,o) {
   if(e['keychain-access-groups'])e['keychain-access-groups']=e['keychain-access-groups'].map(x=>x.endsWith('.*')?x.slice(0,-1)+o.bundle:x);
   return e; // Never synthesize official push, app groups or sign-in permissions.
 }
+export function validateOutputBundle(info,bundle){
+  validateBundle(bundle);
+  if(info.CFBundleIdentifier!==bundle||
+    (bundle!==STOCK_BUNDLE&&(info.TIOAlternateBundle!==bundle||!info.CFBundleDisplayName?.includes('[ALT '))))throw Error('output_bundle_mismatch');
+}
+export function bundleReport(bundle,preparation){
+  validateBundle(bundle);
+  return bundle===STOCK_BUNDLE?{}:{bundleID:bundle,alternateBundle:true,removedNestedBundles:preparation.removedNestedBundles,extensionPolicy:preparation.extensionPolicy};
+}
 function run(program,args,options={}){return exec(program,args,{stdio:['pipe','pipe','pipe'],...options});}
 function main(){
   if(process.argv.includes('--help'))console.log('Optional Apple AI: --apple-ai-dylib /absolute/TurboAppleAI.dylib (requires TIO_APPLE_AI=1 addon)');
@@ -283,11 +293,12 @@ function main(){
   if(process.argv.includes('--help'))console.log('Full 1.0.21/1 (C22): --host ios1021 [--release cN] with --firmware (the TMG package) and --stock-firmware (stock), --external-firmware (R1), when listed, no --product: a release whose releases.json hosts list 1021-full (without --release, the only release). Route patch at the 1.0.21 offsets; every TMG transfer frame needs one authorization in the wizard; needs an addon built for that release.');
   if(process.argv.includes('--help'))console.log('--host is required: ios1021-download or ios1021. Installation never grants flash permission.');
   if(process.argv.includes('--help')){console.log('node ios-addon/package.mjs --host ios1021 --app /absolute/Runner.app --addon /absolute/TurboIOPrivateAddon.dylib --profile /absolute/profile.mobileprovision --identity CERTIFICATE_SHA1 --device YOUR_DEVICE_ID --out /absolute/new-private-output --bundle com.rayneo.venus.pub --firmware /absolute/exact-release-CANDIDATE-NOT-APPROVED.zip --stock-firmware /absolute/stock-package.zip --external-firmware /absolute/external-package.zip [--release cN]');return;}
-  const o={bundle:'com.rayneo.venus.pub'};const args=process.argv.slice(2);
+  const o={bundle:process.env.TURBO_BUNDLE??'com.rayneo.venus.pub'};const args=process.argv.slice(2);
   if(args.length%2)throw Error('expected_named_arguments');
   const seen=new Set();for(let i=0;i<args.length;i+=2){const k=args[i].slice(2);if(!args[i].startsWith('--')||!['app','addon','profile','identity','device','out','bundle','product','experimental-ota','firmware','stock-firmware','external-firmware','translation-module-dir','translation-models','apple-ai-dylib','host','release'].includes(k)||seen.has(k))throw Error('unknown_or_duplicate_argument');seen.add(k);o[k]=args[i+1];}
   validateOptions(o);
   const host=hostProfile(o.host);
+  validateAddonBundle(fs.readFileSync(o.addon),o.bundle);
   const symbols=run('/usr/bin/nm',['-g',o.addon],{encoding:'utf8',maxBuffer:64*1024*1024});
   // FOCUS has a dynamic optional entry even without the translation module.
   validateTranslationPair(!o['translation-module-dir']&&!o['translation-models']?symbols.replaceAll('_TIOOpenLocalTranslation',''):symbols,o);
@@ -363,6 +374,7 @@ print(json.dumps({'entitlements':p['Entitlements'],'expires':p['ExpirationDate']
     if(plist.TIOExperimentalOTABuild!==undefined||plist.UISupportedDevices!==undefined||plist.TIOHostProfile!==(host.runtimeMarker??host.name)||fs.existsSync(path.join(app,CANDIDATE_RESOURCE))||fs.existsSync(path.join(app,STOCK_RESOURCE))||fs.existsSync(path.join(app,EXTERNAL_RESOURCE)))throw Error('download_only_bundle_mismatch');
   }
   if(privateBundleNames(app,ALLOWED_BUNDLE_PRIVATE).length)throw Error('bundle_contains_private_file');
+  validateOutputBundle(JSON.parse(run('plutil',['-convert','json','-o','-',path.join(app,'Info.plist')],{encoding:'utf8'})),o.bundle);
   const ep=path.join(destination,'signing-entitlements.plist');
   run('python3',['-c','import sys,json,plistlib; plistlib.dump(json.load(sys.stdin),open(sys.argv[1],"wb"))',ep],{input:JSON.stringify(entitlement)});fs.chmodSync(ep,0o600);
   fs.copyFileSync(o.profile,path.join(app,'embedded.mobileprovision'));
@@ -371,6 +383,7 @@ print(json.dumps({'entitlements':p['Entitlements'],'expires':p['ExpirationDate']
   for(const p of nested)run('codesign',['--force','--sign',o.identity,'--timestamp=none','--generate-entitlement-der',p]);
   run('codesign',['--force','--sign',o.identity,'--timestamp=none','--generate-entitlement-der','--entitlements',ep,app]);
   run('codesign',['--verify','--deep','--strict',app]);
+  validateOutputBundle(JSON.parse(run('plutil',['-convert','json','-o','-',path.join(app,'Info.plist')],{encoding:'utf8'})),o.bundle);
   if(host.routePatch)verifyRoute(fs.readFileSync(path.join(app,'Frameworks/App.framework/App')),host.routeProfile);
   else verifySignedStockApp(fs.readFileSync(path.join(app,'Frameworks/App.framework/App')),sourceApp,host.name);
   const ipa=path.join(destination,'TurboIO-local-only.ipa');
@@ -380,6 +393,7 @@ print(json.dumps({'entitlements':p['Entitlements'],'expires':p['ExpirationDate']
   if(privateArchiveNames(names).length)throw Error('archive_contains_private_file');
   const preparation=JSON.parse(fs.readFileSync(path.join(app,'TurboIOPrivatePreparation.json'),'utf8'));
   const report=host.fullHost?{appleAIModule:!!appleAI,status:'SIGNED_NOT_DEVICE_ACCEPTED',host:`${host.version} (${host.build})`,hostProfile:host.name,release:release.release,firmwareName:release.name,firmwareSHA256:release.zipSHA256,packages:releasePackages(release).map(e=>({name:e.name,kind:e.kind,resource:e.resource,zipBytes:e.zipBytes,zipSHA256:e.zipSHA256})),signatureVerified:true,officialSourceUploaded:false,privateBootstrapIncluded:false,experimentalOTA:true,flashAuthorized:false,firmwareResourceOnly:false,firmwareBundled:true,routePatched:true,routePatchedSHA256:routeProfile(host.routeProfile).outputSHA,postSigningRouteVerified:true,staleSignatureRemoved:preparation.staleSignatureRemoved===true,originalRunnerSHA256:preparation.originalExecutableSHA256,unsignedRunnerSHA256:preparation.unsignedExecutableSHA256,preparedRunnerSHA256:preparation.preparedExecutableSHA256,sourceIPASHA256:host.sourceIPASHA256,sourceNote:`Third-party decrypted IPA; SHA-256 pinned at intake, not re-hashed here. The owner approved patching App.framework and re-signing it for the full ${host.version} build.`,wireLogCapture:`Capture a wire log during every flash. The ${host.version} OTA sequence the tests replay is the one recorded during the TMG12 flash of 2026-11-15.`,ipaSHA256:createHash('sha256').update(fs.readFileSync(ipa)).digest('hex'),pushEntitled:!!entitlement['aps-environment'],appleSignInEntitled:!!entitlement['com.apple.developer.applesignin']}:{appleAIModule:!!appleAI,status:'SIGNED_NOT_DEVICE_ACCEPTED',host:`${host.version} (${host.build})`,hostProfile:host.name,signatureVerified:true,officialSourceUploaded:false,privateBootstrapIncluded:false,experimentalOTA:false,flashAuthorized:false,firmwareBundled:false,routePatched:false,appFrameworkStockBeforeSigning:true,appFrameworkStockExceptSignature:true,staleSignatureRemoved:preparation.staleSignatureRemoved===true,originalRunnerSHA256:preparation.originalExecutableSHA256,unsignedRunnerSHA256:preparation.unsignedExecutableSHA256,preparedRunnerSHA256:preparation.preparedExecutableSHA256,sourceIPASHA256:host.sourceIPASHA256,sourceNote:'Third-party decrypted IPA; SHA-256 pinned at intake, not re-hashed here. The owner approved patching and re-signing it for this download-only build.',ipaSHA256:createHash('sha256').update(fs.readFileSync(ipa)).digest('hex'),pushEntitled:!!entitlement['aps-environment'],appleSignInEntitled:!!entitlement['com.apple.developer.applesignin']};
+  Object.assign(report,bundleReport(o.bundle,preparation));
   fs.writeFileSync(path.join(destination,'report.json'),JSON.stringify(report,null,2)+'\n',{flag:'wx',mode:0o600});console.log(JSON.stringify(report,null,2));
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){try{main();}catch(e){const known=/^[a-z_]+$/.test(e.message);console.error(known?e.message:'Local packaging failed. Check compatible source, profile and signing identity. No subprocess output or credentials are printed.');process.exitCode=1;}}

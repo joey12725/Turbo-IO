@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import "HostBundle.h"
 #import <mach-o/loader.h>
 #import <mach-o/dyld.h>
 #include <string.h>
@@ -44,13 +45,13 @@ static inline NSString *TIOHostFullMarkerProfile(NSDictionary *info) {
 // The 1.0.21 UUID, only with the full-profile marker. Features gate on this (or
 // TIOHostFullImageMatches), so the download-only build keeps them off.
 static inline NSString *TIOHostFullExpectedUUID(NSDictionary *info) {
-    return [info[@"CFBundleIdentifier"] isEqual:@"com.rayneo.venus.pub"]&&TIOHostFullMarkerProfile(info)?TIOHostDownloadOnlyUUID(info):nil;
+    return [info[@"CFBundleIdentifier"] isEqual:@TIO_TARGET_BUNDLE_ID]&&TIOHostFullMarkerProfile(info)?TIOHostDownloadOnlyUUID(info):nil;
 }
 static inline BOOL TIOHostFullImageMatches(const struct mach_header *h,NSDictionary *info) {
     return TIOHostImageUUIDIs(h,TIOHostFullExpectedUUID(info));
 }
 static inline BOOL TIOHostDownloadOnlyImageMatches(const struct mach_header *h,NSDictionary *info) {
-    return [info[@"CFBundleIdentifier"] isEqual:@"com.rayneo.venus.pub"]&&TIOHostImageUUIDIs(h,TIOHostDownloadOnlyUUID(info));
+    return [info[@"CFBundleIdentifier"] isEqual:@TIO_TARGET_BUNDLE_ID]&&TIOHostImageUUIDIs(h,TIOHostDownloadOnlyUUID(info));
 }
 // The download-only runtime profile: the 1.0.21/1 image without its full-profile marker. The packager
 // writes the same string as the Info.plist marker and other modules compare it. The C15-era spelling
@@ -60,7 +61,7 @@ static inline BOOL TIOHostDownloadOnlyImageMatches(const struct mach_header *h,N
 // (missing or unknown marker); nil for anything else (an unknown app or version, older RayNeo AI
 // releases included, or a build that is not the RayNeo app, such as a preview).
 static inline NSString *TIOHostProfileFor(const struct mach_header *h,NSDictionary *info) {
-    if(![info[@"CFBundleIdentifier"] isEqual:@"com.rayneo.venus.pub"])return nil;
+    if(![info[@"CFBundleIdentifier"] isEqual:@TIO_TARGET_BUNDLE_ID])return nil;
     if(TIOHostDownloadOnlyImageMatches(h,info))return TIOHostFullMarkerProfile(info)?:TIO_HOST_PROFILE_DOWNLOAD_ONLY;
     return nil;
 }
