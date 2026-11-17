@@ -8,7 +8,7 @@ Agents never flash. The owner flashes, with the steps in [OTA.md](../ios-addon/O
 
 ## Current release: TMG12
 
-TMG12 is on the owner's glasses: flashed from C20 on 2026-11-15, with the update confirmed after the first boot, and the owner's first check passed. It is tagged `fw/tmg12`. No full TMG12 device checklist has been run yet. The ZIP keeps its pinned file name, `CANDIDATE-NOT-APPROVED` included. The phone build that flashes it is C20 (release `c20` in [releases.json](../ios-addon/releases.json)).
+TMG12 is on the owner's glasses: flashed from C20 on 2026-11-15, with the update confirmed after the first boot, and the owner's first check passed. It is tagged `fw/tmg12`. No full TMG12 device checklist has been run yet. The ZIP keeps its pinned file name, `CANDIDATE-NOT-APPROVED` included. C20 first flashed it; the current phone release is C22 in [releases.json](../ios-addon/releases.json).
 
 TMG12 is TMG11 ported to stock Strix OS 1.0.6.11 (`stockBase` in [`build-inputs.json`](build-inputs.json)).
 
@@ -55,7 +55,7 @@ Every stock offset the tree uses is named in [`src/stock_layout.h`](src/stock_la
 - The ZIP is byte-identical to candidate 4's (`tmg12(42)`). Three plain builds, one from the worktree and two from clean copies, gave the same bytes.
 - A static check found no changed byte on the boot-confirm path, and nothing in the module posts to the OTA queue.
 - The emulator ran the candidates with no crash, assert, hang, reset or new guest-error class. The Display page passed 100 open and close cycles.
-- `tools/phone_pins.py` builds the phone pins from this ZIP for the 1.0.21 full host (for C20 then; now the TMG12 package of `c21`).
+- `tools/phone_pins.py` builds the phone pins from this ZIP for the 1.0.21 full host (for C20 then; now the TMG12 package of `c22`).
 
 Not checked: anything on glasses, the phone link, the OTA install of a 1.0.6.11 package and its post-boot confirm, real sensors and real timing.
 
@@ -136,7 +136,7 @@ Do this only for a new release. It ends the TMG12 identity carry-over (see above
    python3 -I "$FW/tools/phone_pins.py" --write "$R/ios-addon" --inputs "$TURBO_INPUTS"
    python3 -I "$FW/tools/phone_pins.py" --check "$R/ios-addon" --inputs "$TURBO_INPUTS"
    ```
-   `--check` prints `PHONEPINS_OK` and the release names. `--tree-release` prints the release whose ZIP is the tree's build (today `c21`).
+   `--check` prints `PHONEPINS_OK` and the release names. `--tree-release` prints the release whose ZIP is the tree's build (today `c22`).
 
 `phone_pins.py` refuses emulator-only builds in every mode. It also refuses the superseded TMG12 candidates 1 to 3 by their SHA-256 (`SUPERSEDED_ZIPS`).
 

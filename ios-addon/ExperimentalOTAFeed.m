@@ -167,6 +167,7 @@ static void Reply(int fd,NSInteger status,NSData *body,NSString *mime,NSDictiona
                 BOOL stock=[package[@"kind"] isEqual:@"STOCK"];
                 NSString *task=stock?[@"Stock " stringByAppendingString:TIO_FW_BASE]:[NSString stringWithFormat:@"Turbo Menu %@ PRIVATE EXPERIMENT",package[@"name"]];
                 NSString *desc=stock?[NSString stringWithFormat:@"Stock %@.",TIO_FW_BASE]:[NSString stringWithFormat:@"PRIVATE EXPERIMENT: AP modified, other %lu payloads unchanged. Runtime unverified.",(unsigned long)([package[@"memberPins"] count]-2)];
+                if([package[@"kind"] isEqual:@"EXTERNAL"]){task=TIOOTAPackageDisplayName(package);desc=TIOText(@"ota.package.externalDetail");}
                 data=@{@"taskName":task,@"appName":@"Strix OS",@"packageName":@"Strix OS",@"versionName":TIO_FW_FEED_VERSION_NAME,@"versionCode":@(TIO_FW_FEED_VERSION_CODE),@"upgradeType":@1,@"userScope":@0,@"updateDesc":desc,@"appIcon":@"",@"apkSize":@(_archive.length),@"apkMd5":_md5,@"downloadUrl":[NSString stringWithFormat:@"http://127.0.0.1:%u/p/%@/%@.zip",_port,_token,TIO_FW_OTA_FOLDER]};
             }
             response=@{@"error_code":@1000,@"error_msg":@"success",@"data":data};

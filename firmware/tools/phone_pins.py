@@ -6,7 +6,9 @@ packages are built on (1.0.6.11, the only base a phone release may have), its ho
 ["1021-full"], the 1.0.21 full host, and its packages: a list of {label, zip {input, bytes, sha256}, acceptCurrent},
 the ZIP's path under $TURBO_INPUTS with its size and SHA-256 and the glasses versions that package may be flashed
 over). The first package is the default the phone selects at every launch and must be a TMG build; a second one, if
-listed, must be labelled STOCK-<base>. Any other label is refused.
+listed, must be labelled STOCK-<base>. A third may be the explicitly known external Turbo-IO build TMIG2-VIDEO-R1
+on stock 1.0.6.11, accepting only that base. It is checked like TMG but can never be the tree label or default.
+Any other label is refused.
 For every package this reads the ZIP, checks its manifest, its pinned identity, and that AP, APC1 and BTH all report
 the base (build.py's core_identity). A TMG package's non-AP members must be byte-for-byte the members of the stock ZIP
 of its base and its AP must differ from the stock AP; the TMG package whose label is the tree's label (../RELEASE)
@@ -58,7 +60,9 @@ RELEASE_BASES = ('1.0.6.11',)
 TMG_LABEL = re.compile(r'TMG[0-9]+')
 # The fixed name each kind of package has inside the app bundle (package.mjs bundles it there, the addon reads it
 # back); the TMG name is the one the bundled release ZIP has always had.
-PACKAGE_RESOURCES = {'TMG': 'TurboWeReadCandidate.zip', 'STOCK': 'TurboStockFirmware.zip'}
+PACKAGE_RESOURCES = {'TMG': 'TurboWeReadCandidate.zip', 'STOCK': 'TurboStockFirmware.zip',
+                     'EXTERNAL': 'TurboExternalFirmware.zip'}
+EXTERNAL_BASES = {'TMIG2-VIDEO-R1': '1.0.6.11'}
 # ZIPs that must never become a phone release, by SHA-256: the emulator-only TMG12 candidates 1 to 3 on stock
 # 1.0.6.11, which the TMG12 release (candidate 4's bytes) replaced. Their own bytes are a valid 1.0.6.11 build, so
 # once 1.0.6.11 became a phone release base only this list refuses them under a label other than the tree's.
@@ -172,12 +176,14 @@ def load_build(root=FW):
 
 
 def package_kind(label, base):
-    """TMG for a TMG build, STOCK for the base's stock package (label STOCK-<base>); any other label is refused."""
+    """Only TMGn, the base's STOCK label, or an explicitly known external build on that base."""
     if isinstance(label, str) and TMG_LABEL.fullmatch(label):
         return 'TMG'
     if label == 'STOCK-' + base:
         return 'STOCK'
-    raise ValueError('unknown package label ' + repr(label) + ': a package is TMGn or STOCK-' + base)
+    if isinstance(label, str) and EXTERNAL_BASES.get(label) == base:
+        return 'EXTERNAL'
+    raise ValueError('unknown package label ' + repr(label))
 
 
 def load_releases(path):
@@ -197,8 +203,8 @@ def load_releases(path):
             if old in spec:
                 raise ValueError(name + ': ' + old + ' belongs to a package now (packages)')
         packages = spec.get('packages')
-        if not isinstance(packages, list) or not 1 <= len(packages) <= 2:
-            raise ValueError(name + ': packages must list one TMG package and at most one STOCK package')
+        if not isinstance(packages, list) or not 1 <= len(packages) <= 3:
+            raise ValueError(name + ': packages must list TMG, optionally STOCK, then optionally EXTERNAL')
         kinds = []
         for package in packages:
             if not isinstance(package, dict):
@@ -214,9 +220,11 @@ def load_releases(path):
                 raise ValueError(name + ': ' + package['label'] + ': acceptCurrent must list distinct versions')
             for version in accept:
                 version_parts(version)
-        # The first package is the default the phone selects at launch: always the TMG build. A second one is the stock package.
-        if kinds[0] != 'TMG' or kinds[1:] not in ([], ['STOCK']):
-            raise ValueError(name + ': the first package must be a TMG build and a second one must be STOCK-' + spec['stockBase'])
+            if kinds[-1] == 'EXTERNAL' and accept != [spec['stockBase']]:
+                raise ValueError(name + ': an external package accepts only its stock base')
+        # The default is always TMG; an external package requires the stock way back ahead of it.
+        if kinds not in (['TMG'], ['TMG', 'STOCK'], ['TMG', 'STOCK', 'EXTERNAL']):
+            raise ValueError(name + ': packages must be ordered TMG, STOCK, EXTERNAL')
         if len({p['zip']['sha256'] for p in packages}) != len(packages):
             raise ValueError(name + ': two packages share one ZIP')
         if spec.get('hosts') != list(HOSTS):
@@ -226,7 +234,7 @@ def load_releases(path):
 
 def packages(spec):
     """Each package of a release as the checks below read it: its label (as firmware), the release's stock base, its
-    ZIP and accepted versions, and its kind (TMG or STOCK)."""
+    ZIP and accepted versions, and its kind (TMG, STOCK or EXTERNAL)."""
     return [{'firmware': p['label'], 'stockBase': spec['stockBase'], 'zip': p['zip'], 'acceptCurrent': p['acceptCurrent'],
              'kind': package_kind(p['label'], spec['stockBase'])} for p in spec['packages']]
 
@@ -245,6 +253,8 @@ def refuse_emulator_only(name, spec, build=None, tree_spec=None, tree_label=None
     build = build or load_build()
     tree_spec = tree_spec if tree_spec is not None else json.loads((FW/'build-inputs.json').read_text())
     tree_label = tree_label or release_label()
+    if package_kind(spec['firmware'], spec['stockBase']) == 'EXTERNAL' and spec['firmware'] == tree_label:
+        raise ValueError(name + ': an external package can never be the tree label')
     if not build.package_shape(spec['stockBase'])['phoneRelease']:
         raise ValueError(name + ': stock ' + spec['stockBase'] + ' has no phone release (emulator only)')
     if '-EMU-ONLY-' in spec['zip']['input']:
@@ -309,9 +319,9 @@ def release_pins(name, spec, archive, build=None, tree_spec=None, tree_label=Non
             raise ValueError(name + ': ' + member + ' is not the stock ' + base + ' member')
     if kind == 'STOCK' and manifest_data != stock_manifest:
         raise ValueError(name + ': OtaFileInfo.json is not the stock ' + base + ' manifest')
-    # A TMG package carries its own AP: the stock package under a TMG label is refused.
-    if kind == 'TMG' and payloads['nuttx_ap.bin'] == stock_payloads['nuttx_ap.bin']:
-        raise ValueError(name + ': ' + spec['firmware'] + ' carries the stock ' + base + ' AP; a TMG package must be a TMG build')
+    # Patched packages (TMG and external) carry their own AP; stock under either label is refused.
+    if kind in ('TMG', 'EXTERNAL') and payloads['nuttx_ap.bin'] == stock_payloads['nuttx_ap.bin']:
+        raise ValueError(name + ': ' + spec['firmware'] + ' carries the stock ' + base + ' AP; a patched package must have a modified AP')
     # Never mix cores, and the base in releases.json is the one the ZIP's own cores report.
     if build.core_identity(payloads, base) != build.core_identity(stock_payloads, base):
         raise ValueError(name + ': cores differ from stock ' + base)

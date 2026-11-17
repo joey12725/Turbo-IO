@@ -1,10 +1,12 @@
 {
   "schema": 1,
-  "note": "Phone release configurations. firmware/tools/phone_pins.py reads this file and the release ZIPs (paths relative to $TURBO_INPUTS) and writes FirmwarePins.h and firmware-pins-<name>.json; --check runs in the gate. Every release is named cN, is built on stock 1.0.6.11 and is built only for the 1.0.21 full host (1021-full). With exactly one release, a build that names none (no TIO_RELEASE, no --release) is that release. A release lists its packages: the first is a TMG build and is selected at every launch; a second one, labelled STOCK-<base>, is the base's stock package, which the owner can pick in the flash wizard instead. C21 is the only release: it carries TMG12 and stock 1.0.6.11, flashes either from the 1.0.21 full host, and accepts glasses on 1.0.5.12 (TMG11) or 1.0.6.11 for both.",
+  "note": "Phone releases named cN for the 1.0.21 full host (1021-full), on stock 1.0.6.11. phone_pins.py reads this file and exact release ZIPs under $TURBO_INPUTS to generate FirmwarePins.h and firmware-pins-<name>.json; the gate checks them. C22 is the only release. Packages are ordered TMG12 (selected at every launch), STOCK-1.0.6.11 (the way back), then external Turbo-IO TMIG2-VIDEO-R1. TMG12 and stock accept 1.0.5.12 or 1.0.6.11; R1 accepts only 1.0.6.11. R1 has never been flashed from C22, nor on real glasses as far as its publisher reports. This fork's Turbo phone features target TMG12 and are not expected to work on R1.",
   "releases": {
-    "c21": {
-      "builds": "C21: flashes TMG12 (TMG11 ported to stock 1.0.6.11) or stock 1.0.6.11, picked in the wizard, from the 1.0.21 full host",
-      "hosts": ["1021-full"],
+    "c22": {
+      "builds": "C22: TMG12 (default), stock 1.0.6.11, or third-party TMIG2-VIDEO-R1, picked in the wizard, from the 1.0.21 full host",
+      "hosts": [
+        "1021-full"
+      ],
       "stockBase": "1.0.6.11",
       "packages": [
         {
@@ -14,7 +16,10 @@
             "bytes": 9549211,
             "sha256": "3abc73ffff78d890a49a0c148c64eef6a8577458bb0d759fca1b032bc031e373"
           },
-          "acceptCurrent": ["1.0.5.12", "1.0.6.11"]
+          "acceptCurrent": [
+            "1.0.5.12",
+            "1.0.6.11"
+          ]
         },
         {
           "label": "STOCK-1.0.6.11",
@@ -23,7 +28,21 @@
             "bytes": 9447267,
             "sha256": "5821506f720a43a9a3aea9c5722a1548463dcf1cbedcb2d97a242e2a64037d6e"
           },
-          "acceptCurrent": ["1.0.5.12", "1.0.6.11"]
+          "acceptCurrent": [
+            "1.0.5.12",
+            "1.0.6.11"
+          ]
+        },
+        {
+          "label": "TMIG2-VIDEO-R1",
+          "zip": {
+            "input": "public-r1/TMIG2-VIDEO-R1-1.0.6.11-lab.zip",
+            "bytes": 9589819,
+            "sha256": "c03321061605aba186b44e7b90d86d3b13a2f75e081687fc684680e2800a4e8a"
+          },
+          "acceptCurrent": [
+            "1.0.6.11"
+          ]
         }
       ]
     }

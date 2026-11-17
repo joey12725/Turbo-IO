@@ -10,6 +10,7 @@ parser.add_argument('--out',type=Path,help='log and binary directory (default bu
 parser.add_argument('--tree-firmware',type=Path,help='the ZIP built from the current firmware tree, for the tree audit (default: --firmware)')
 parser.add_argument('--tree-stock',type=Path,help="the stock ZIP of the tree's base, for the tree audit and tmg4-stock-abi (default: build.py --show stock-zip)")
 parser.add_argument('--stock-package',type=Path,help="the release's second package, the stock ZIP of its base (phone_pins.py --resolve cN --package STOCK-<base>; default: build.py --show stock-zip for the release's base)")
+parser.add_argument('--external-package',type=Path,help="the external package ZIP (default: the release's pinned path under $TURBO_INPUTS)")
 parser.add_argument('--firmware-only',action='store_true',help='the tree audit and the firmware groups only (tmg4-host, tmg9-wheel-hook, tmg9-detent); needs --tree-firmware, refuses --firmware and --release')
 args=parser.parse_args()
 FIRMWARE_GROUPS={'tmg4-host','tmg9-wheel-hook','tmg9-detent'}
@@ -64,6 +65,9 @@ else:
     stock_label=next((p['label'] for p in release_packages[1:] if p['label'].startswith('STOCK-')),None)
     stock_package=args.stock_package or release_stock
     if not stock_package.is_file():raise SystemExit('stock package ZIP not found: '+str(stock_package))
+    external_spec=next((p for p in release_packages[2:]),None)
+    external_package=args.external_package or (Path(os.environ['TURBO_INPUTS'])/external_spec['zip']['input'] if external_spec else None)
+    if external_package and not external_package.is_file():raise SystemExit('external package ZIP not found: '+str(external_package))
     print('release: '+args.release+' ('+release_default['label']+' on stock '+release['stockBase']+'; accepts '+', '.join(release_versions)+'; packages '+', '.join(p['label'] for p in release_packages)+')')
 out=(args.out or P/'build/tests').resolve();out.mkdir(parents=True,exist_ok=True)
 def run(name,cmd,env=None):
@@ -205,6 +209,7 @@ if only is None or 'pins' in only:
     run('pins',['python3','-I',FW/'tools/phone_pins.py','--verify',args.release,'--zip',args.firmware,'--dir',P])
     # The stock package against its own entry in the firmware-pins JSON (every member equal to the base's stock ZIP).
     if stock_label:run('pins-stock-package',['python3','-I',FW/'tools/phone_pins.py','--verify',args.release,'--package',stock_label,'--zip',stock_package,'--dir',P])
+    if external_spec:run('pins-external-package',['python3','-I',FW/'tools/phone_pins.py','--verify',args.release,'--package',external_spec['label'],'--zip',external_package,'--dir',P])
     # The generator itself, with this release's ZIP and the tree's ZIP (once when they are the same file); release ZIPs
     # not given here are read from $TURBO_INPUTS.
     zips=[args.firmware]+([args.tree_firmware] if args.tree_firmware and args.tree_firmware.resolve()!=args.firmware.resolve() else [])
@@ -257,17 +262,17 @@ test('runtime-status',['tests/TDRuntimeTests.m','TDPhoneRun.m','TDPhoneStore.m',
 test('voice-tts',['VoiceTTSTests.m','VoiceTTSText.m'])
 with tempfile.TemporaryDirectory(prefix='turbo-navs3-test-') as tmp:
     root=Path(tmp)
-    for name,archive in [('stock',release_stock),('candidate',args.firmware),('stock-package',stock_package)]:
+    for name,archive in [('stock',release_stock),('candidate',args.firmware),('stock-package',stock_package)]+([('external-package',external_package)] if external_package else []):
         target=root/name;target.mkdir()
         with zipfile.ZipFile(archive) as z:
             for member in z.namelist():
                 assert Path(member).name==member
                 (target/member).write_bytes(z.read(member))
-    test('archive',['ExperimentalOTATests.m','ExperimentalOTA.m'],[args.firmware,stock_package],['-lz'])
+    test('archive',['ExperimentalOTATests.m','ExperimentalOTA.m'],[args.firmware,stock_package,external_package],['-lz'])
     test('directory',['ExperimentalOTADirectoryTests.m','ExperimentalOTA.m'],[root/'candidate',root/'stock'],['-lz'])
     gate=['ExperimentalOTA.m','ExperimentalOTAFlash.m','ExperimentalOTAGuard.m']
     test('flash',['ExperimentalOTAFlashTests.m',*gate,'ExperimentalOTAFeed.m'],[root/'candidate',root/'stock'],['-lz'])
-    test('feed',['ExperimentalOTAFeedTests.m',*gate,'ExperimentalOTAFeed.m'],[args.firmware,stock_package],['-lz','-DTIO_OTA_FEED_ARMING_ENABLED=1'])
+    test('feed',['ExperimentalOTAFeedTests.m',*gate,'ExperimentalOTAFeed.m'],[args.firmware,stock_package,external_package],['-lz','-DTIO_OTA_FEED_ARMING_ENABLED=1'])
     test('feed-restart',['tests/OTAFeedRestartTests.m',*gate,'ExperimentalOTAFeed.m'],[],['-lz'])
     test('wizard',['OTAWizardModelTests.m','OTAWizardModel.m',*gate,'ExperimentalOTAFeed.m'],[],['-lz'])
     def adapted_policy(name,file,substitutions):
@@ -317,7 +322,7 @@ with tempfile.TemporaryDirectory(prefix='turbo-navs3-test-') as tmp:
             if 'PASS flash sequence unprotected: authorization refused without the hook protection (flash build '+state+')' not in (out/(binary+'-unprotected.log')).read_text():raise RuntimeError(binary+'-unprotected did not report PASS')
         groups.append('flash-sequence-1021');print('flash-sequence-1021: PASS (replay, 11 mutations, and the hook protection in a flash and a non-flash build)')
     else:skip('flash-sequence-1021','not selected by --only')
-    # The two packages of the release (tests/FlashPackagesTests.m) through the same unchanged guard and gate with both
+    # All three packages of the release (tests/FlashPackagesTests.m) through the same unchanged guard and gate with all
     # real ZIPs: the stock replay of the recorded sequence, cross refusals, sizes, selection changes, a fresh process,
     # and (with a test-only package table in a copy of ExperimentalOTA.m) the per-package version acceptance.
     seen.add('flash-packages')
@@ -339,13 +344,18 @@ with tempfile.TemporaryDirectory(prefix='turbo-navs3-test-') as tmp:
         table.write_text(source)
         run('flash-packages-version-build',flags+[P/'tests/FlashPackagesTests.m',table,P/'ExperimentalOTAGuard.m',adapted,'-lz','-DTIO_DISPLAY_FLASH=1','-DTIO_OTA_FLASH_ENABLED=1','-DTIO_TEST_PACKAGE_TABLE=1','-o',out/'flash-packages-version'])
         base=[root/'candidate',root/'stock-package',root,P/'tests/flash-sequence-1021.json']
-        for mode in ('fresh','stock-replay','tmg-stock-manifest','tmg-stock-slice','stock-tmg-manifest','stock-tmg-slice','size','select-stage1','select-stage2','select-stage3','index','version'):
+        for mode in ('fresh','stock-replay','tmg-stock-manifest','tmg-stock-slice','stock-tmg-manifest','stock-tmg-slice','size','select-stage1','select-stage2','select-stage3','index','version','r1-replay','r1-tmg-manifest','r1-tmg-slice','tmg-r1-manifest','tmg-r1-slice','r1-select-stage1','r1-select-stage2','r1-select-stage3','r1-size','r1-version'):
             binary='flash-packages-version' if mode=='version' else 'flash-packages'
-            run('flash-packages-'+mode,[out/binary,*base,mode]+([str(stock_slices),str(stock_bytes)] if mode=='stock-replay' else []))
+            replay=mode in ('stock-replay','r1-replay')
+            archive=external_package if mode=='r1-replay' else stock_package
+            with zipfile.ZipFile(archive) as z:replay_sizes={i.filename:i.file_size for i in z.infolist()}
+            replay_slices=sum((replay_sizes[n]+slice_bytes-1)//slice_bytes for n in names)
+            replay_bytes=sum(replay_sizes[n] for n in names)
+            run('flash-packages-'+mode,[out/binary,*base,mode]+([str(replay_slices),str(replay_bytes)] if replay else [])+[root/'external-package'])
             log=(out/('flash-packages-'+mode+'.log')).read_text()
-            if 'PASS flash packages '+mode not in log:raise RuntimeError('flash-packages-'+mode+' did not report PASS')
-            if mode=='stock-replay' and ' %d slices, %d bytes'%(stock_slices,stock_bytes) not in log:raise RuntimeError('flash-packages-stock-replay: slice totals differ')
-        groups.append('flash-packages');print('flash-packages: PASS (stock replay %d slices %d bytes, cross refusals, sizes, selection changes, capture-time index check, fresh process, version per package)'%(stock_slices,stock_bytes))
+            if ('PASS flash packages '+mode if 'r1' not in mode else 'PASS flash packages ') not in log:raise RuntimeError('flash-packages-'+mode+' did not report PASS')
+            if replay and ' %d slices, %d bytes'%(replay_slices,replay_bytes) not in log:raise RuntimeError('flash-packages-stock-replay: slice totals differ')
+        groups.append('flash-packages');print('flash-packages: PASS (stock replay %d slices %d bytes, cross refusals, sizes, selection changes, capture-time index check, fresh process, version per package, R1 replay and refusals)'%(stock_slices,stock_bytes))
     else:skip('flash-packages','not selected by --only')
     # The guard groups: the same unchanged flash policy and feed with fake host info. G1: the refusal
     # must not depend on build flags. Each test is built in every flag set below; every build must print

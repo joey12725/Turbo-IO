@@ -577,6 +577,7 @@ static NSString *InfoBody(void) {
             NSDictionary *package=SelectedPackage();
             cell.textLabel.text=TIOText(@"ota.package.pick");
             cell.detailTextLabel.text=[package[@"kind"] isEqual:@"STOCK"]?TIOFormat(@"ota.package.stockDetail",TIO_FW_BASE):TIOFormat(@"ota.package.tmgDetail",FirmwareName());
+            if([package[@"kind"] isEqual:@"EXTERNAL"])cell.detailTextLabel.text=TIOText(@"ota.package.externalDetail");
             cell.accessoryView=[self pickerForStage:[s[@"stage"] integerValue]];
             cell.accessibilityIdentifier=@"ota-package-picker-row";
             return;
@@ -692,6 +693,7 @@ static NSString *InfoBody(void) {
         NSMutableArray *names=[NSMutableArray array];
         for (NSUInteger i=0;i<TIOOTAPackageCount();i++) [names addObject:TIOOTAPackageDisplayName(TIOOTAPackageAt(i))];
         UISegmentedControl *picker=[[UISegmentedControl alloc] initWithItems:names];
+        picker.apportionsSegmentWidthsByContent=YES;
         picker.accessibilityIdentifier=@"ota-package-picker";
         picker.accessibilityLabel=TIOText(@"ota.package.pick");
         [picker addTarget:self action:@selector(packageChanged:) forControlEvents:UIControlEventValueChanged];
