@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import "HostBundle.h"
 #import "TIOLanguage.h"
 #import <objc/runtime.h>
 #import "RecordingExports.h"
@@ -71,7 +72,7 @@ void TIOInstallRecordingExportMenu(void){
 #ifdef TIO_EXPORT_MENU_HOTLOAD
 __attribute__((constructor))static void InstallMenu(void){
     dispatch_async(dispatch_get_main_queue(),^{
-        if([NSBundle.mainBundle.bundleIdentifier isEqual:@"com.rayneo.venus.pub"]&&[[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"] isEqual:@"67"])TIOInstallRecordingExportMenu();
+        if([NSBundle.mainBundle.bundleIdentifier isEqual:@TIO_TARGET_BUNDLE_ID]&&[[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"] isEqual:@"67"])TIOInstallRecordingExportMenu();
     });
 }
 #endif

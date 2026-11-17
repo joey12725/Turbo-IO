@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import "HostBundle.h"
 #import "TIOLanguage.h"
 #import <objc/runtime.h>
 #import "RecordingText.h"
@@ -19,5 +20,5 @@ void TIOInstallRecordingTextMenu(void){
     TextPriorRows=(void *)method_setImplementation(rows,(IMP)TextRows);TextPriorCell=(void *)method_setImplementation(cell,(IMP)TextCell);TextPriorSelect=(void *)method_setImplementation(select,(IMP)TextSelect);
 }
 #ifdef TIO_TEXT_MENU_HOTLOAD
-__attribute__((constructor))static void InstallTextMenu(void){dispatch_async(dispatch_get_main_queue(),^{if([NSBundle.mainBundle.bundleIdentifier isEqual:@"com.rayneo.venus.pub"]&&[[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"] isEqual:@"67"])TIOInstallRecordingTextMenu();});}
+__attribute__((constructor))static void InstallTextMenu(void){dispatch_async(dispatch_get_main_queue(),^{if([NSBundle.mainBundle.bundleIdentifier isEqual:@TIO_TARGET_BUNDLE_ID]&&[[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"] isEqual:@"67"])TIOInstallRecordingTextMenu();});}
 #endif

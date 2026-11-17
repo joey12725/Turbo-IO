@@ -123,6 +123,7 @@ if [[ $firmware_only == 0 ]]; then
   source "$TURBO_INPUTS/package.env"
   set +a
   TURBO_APP1021=${TURBO_APP1021:-$inherited_app1021}
+  [[ ${TURBO_BUNDLE-com.rayneo.venus.pub} =~ ^com\.rayneo\.venus\.pub(\.[a-z0-9]{1,24})?$ ]] || { echo 'Invalid TURBO_BUNDLE' >&2; exit 2; }
 fi
 # The stock 1.0.21/1 app, for the stages that test or package against the real host.
 require_app1021() {
@@ -141,7 +142,7 @@ build_stage() {
   cd "$ED"
   TIO_MAPKIT_ENABLED=1 TIO_IMAGE_RX_LAB=1 TIO_IMAGE_RX_WIDE=1 \
     TIO_DISPLAY_PHONE=1 TIO_DISPLAY_FLASH=1 TIO_OTA_FLASH_ENABLED=1 \
-    TIO_CLASSIC_BINDINGS=1 bash build.sh embedded com.rayneo.venus.pub
+    TIO_CLASSIC_BINDINGS=1 bash build.sh embedded "${TURBO_BUNDLE-com.rayneo.venus.pub}"
 }
 symbols_stage() {
   local addon=$ED/build/mapkit/TurboIOPrivateAddon.dylib marker_count

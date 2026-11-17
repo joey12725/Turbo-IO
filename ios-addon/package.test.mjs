@@ -5,6 +5,8 @@ import {validateHost,validateOptions,validateResearchPair,entitlementsFor,locati
 import {inspectedHost} from './host-compatibility.mjs';
 import {inspectMachO,addEmbeddedLoad} from './macho-embed.mjs';
 import {patch,verifyRoute} from './patch-route.mjs';
+import {STOCK_BUNDLE,validateBundle,validateAddonBundle,alternateBundleMarker} from './host-bundle.mjs';
+import {validateOutputBundle,bundleReport} from './package.mjs';
 // The stock 1.0.21/1 app, the only host. The 1.0.7/230 and 1.0.11/259 identities stay here only as hosts that must be refused.
 const info={CFBundleIdentifier:'com.rayneo.venus.pub',CFBundleExecutable:'Runner',CFBundleShortVersionString:'1.0.21',CFBundleVersion:'1'};
 const uuid1021='74da0780dcf0384f9e841ac12f56cdf5';
@@ -37,6 +39,60 @@ test('entitlements restricted to existing profile grants',()=>{
  assert.equal(entitlementsFor(p,options)['aps-environment'],undefined);
  assert.throws(()=>entitlementsFor({...p,devices:[]},options));
  assert.throws(()=>entitlementsFor({...p,expires:'2000-01-01T00:00:00Z'},options));
+});
+test('one configured output bundle: exact suffix grammar; stock intake remains original',()=>{
+ for(const bundle of [STOCK_BUNDLE,STOCK_BUNDLE+'.a',STOCK_BUNDLE+'.'+ 'a1'.repeat(12)]){
+  assert.equal(validateBundle(bundle),bundle);
+  validateOptions({...options,bundle});validateOptions({...optionsDL,bundle});
+ }
+ for(const bundle of ['',undefined,'example.other',STOCK_BUNDLE+'.',STOCK_BUNDLE+'.UPPER',STOCK_BUNDLE+'.a-b',STOCK_BUNDLE+'.a_b',STOCK_BUNDLE+'.a.b',STOCK_BUNDLE+'.'+ 'a'.repeat(25),STOCK_BUNDLE+'.é',STOCK_BUNDLE+'x',STOCK_BUNDLE+'.x\n']){
+  assert.throws(()=>validateBundle(bundle),/invalid_bundle/);
+  assert.throws(()=>validateOptions({...options,bundle}),/invalid_bundle/);
+  assert.throws(()=>validateOptions({...optionsDL,bundle}),/invalid_bundle/);
+ }
+ const bundle=STOCK_BUNDLE+'.test1';
+ assert.equal(inspectedHost({...info,CFBundleIdentifier:bundle},uuid1021),null);
+ for(const host of ['ios1021','ios1021-download'])assert.throws(()=>validateHost({...info,CFBundleIdentifier:bundle},Buffer.alloc(32),Buffer.alloc(32),host),/requires_original_ios1021_1/);
+});
+test('personal-team entitlements retain only the supplied profile grants and exact application identity',()=>{
+ const bundle=STOCK_BUNDLE+'.test1',o={...options,bundle};
+ const entitlements={'application-identifier':'EXAMPLE.'+bundle,'com.apple.developer.team-identifier':'EXAMPLE','keychain-access-groups':['EXAMPLE.'+bundle],'get-task-allow':true};
+ const p={certs:[o.identity],devices:[o.device],expires:'2099-01-01T00:00:00Z',entitlements};
+ const result=entitlementsFor(p,o);
+ assert.deepEqual(result,entitlements);assert.notEqual(result,entitlements);
+ for(const key of ['aps-environment','com.apple.developer.applesignin','com.apple.developer.associated-domains','com.apple.security.application-groups','com.apple.developer.icloud-container-identifiers'])assert.equal(result[key],undefined);
+ assert.throws(()=>entitlementsFor(p,{...o,bundle:STOCK_BUNDLE+'.test2'}),/profile_bundle_mismatch/);
+ assert.throws(()=>entitlementsFor(p,options),/profile_bundle_mismatch/);
+ assert.deepEqual(entitlementsFor({...p,entitlements:{...entitlements,'application-identifier':'EXAMPLE.*','keychain-access-groups':['EXAMPLE.*']}},o),entitlements);
+ for(const patch of [{devices:[]},{certs:[]},{expires:'2000-01-01T00:00:00Z'}])assert.throws(()=>entitlementsFor({...p,...patch},o),/profile_identity_device_or_expiry_mismatch/);
+});
+test('mixed addon and package identities fail, including alternate addon packaged as standard',()=>{
+ const a=STOCK_BUNDLE+'.test1',b=STOCK_BUNDLE+'.test2';
+ const standard=Buffer.from(STOCK_BUNDLE+'\0');
+ const alternate=Buffer.from(a+'\0'+alternateBundleMarker(a)+'\0');
+ assert.ok(validateAddonBundle(standard,STOCK_BUNDLE));assert.ok(validateAddonBundle(alternate,a));
+ for(const [bytes,bundle] of [[standard,a],[alternate,b],[alternate,STOCK_BUNDLE],[Buffer.concat([alternate,standard]),STOCK_BUNDLE],[Buffer.concat([alternate,Buffer.from(b+'\0')]),b],[Buffer.from(a+'\0'),a]])assert.throws(()=>validateAddonBundle(bytes,bundle),/addon_bundle_mismatch/);
+ for(const bundle of [STOCK_BUNDLE,a]){
+  const out={...info,CFBundleIdentifier:bundle,...(bundle===a?{TIOAlternateBundle:a,CFBundleDisplayName:'RayNeo AI [ALT test1]'}:{})};
+  validateOutputBundle(out,bundle);
+  assert.throws(()=>validateOutputBundle({...out,CFBundleIdentifier:b},bundle),/output_bundle_mismatch/);
+ }
+});
+test('build and packaging entry points refuse invalid configuration before compiling or signing',()=>{
+ const root=fs.mkdtempSync(path.join(packageTestDirectory,'build','invalid-bundle-'));
+ try{
+  fs.writeFileSync(path.join(root,'package.env'),'# no signing inputs\n');
+  for(const bundle of ['',STOCK_BUNDLE+'.UPPER',STOCK_BUNDLE+'.a-b',STOCK_BUNDLE+'.'+ 'x'.repeat(25),STOCK_BUNDLE+'.x\n']){
+   const env={...process.env,TURBO_INPUTS:root,TURBO_BUNDLE:bundle};
+   const build=spawnSync('bash',[path.join(packageTestDirectory,'build.sh'),'embedded'],{env,encoding:'utf8'});
+   assert.equal(build.status,2,build.stderr);assert.match(build.stderr,/Invalid explicit target Bundle ID/);
+   const wrapper=spawnSync('bash',[path.join(packageTestDirectory,'../scripts/turbo-package.sh'),'--host','1021-full','invalid-id-test'],{env,encoding:'utf8'});
+   assert.equal(wrapper.status,2,wrapper.stderr);assert.match(wrapper.stderr,/invalid bundle ID/);
+   const args=Object.entries({...options,out:path.join(root,'out')}).filter(([key])=>key!=='bundle').flatMap(([key,value])=>['--'+key,value]);
+   const pkg=spawnSync(process.execPath,[path.join(packageTestDirectory,'package.mjs'),...args],{env,encoding:'utf8'});
+   assert.equal(pkg.status,1,pkg.stderr);assert.match(pkg.stderr,/invalid_bundle/);assert.equal(fs.existsSync(path.join(root,'out')),false);
+  }
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
 test('location prompt follows the linked navigation provider',()=>{
  assert.match(locationUsageFor('_x OBJC_CLASS_$_TIOMapKitNavigationPanel _y'),/turn-by-turn/);
@@ -325,6 +381,7 @@ test('real 1.0.21 input: pins, unpatched routes and deterministic signature stri
  assert.throws(()=>verifySignedStockApp(resign(a,1700000,keepVm(a)),a,'ios1021-download'),/changed_after_signing/); // vmsize below filesize
 });
 test('real 1.0.21 input: unsigned preparation leaves App.framework byte-identical to stock',t=>{
+ const bundle=process.env.TURBO_BUNDLE??'com.rayneo.venus.pub';
  const p=process.env.IOS1021_TEST_APP,addon=path.join(packageTestDirectory,'build/mapkit/TurboIOPrivateAddon.dylib');
  if(!p)return t.skip('set IOS1021_TEST_APP');if(!fs.existsSync(addon))return t.skip('build the embedded addon first');
  const root=fs.mkdtempSync(path.join(packageTestDirectory,'build','h1021-prepare-'));
@@ -333,10 +390,10 @@ test('real 1.0.21 input: unsigned preparation leaves App.framework byte-identica
   const src=path.join(root,'src/Runner.app');fs.mkdirSync(path.join(src,'Frameworks/App.framework'),{recursive:true});fs.mkdirSync(path.join(src,'_CodeSignature'));
   for(const f of ['Info.plist','Runner','Frameworks/App.framework/App','Frameworks/App.framework/Info.plist','_CodeSignature/CodeResources'])fs.copyFileSync(path.join(p,f),path.join(src,f));
   const embed=path.join(packageTestDirectory,'macho-embed.mjs');
-  assert.throws(()=>runFixtureCommand(process.execPath,[embed,src,path.join(root,'plain/Runner.app'),addon,'com.rayneo.venus.pub'],{stdio:'pipe'}),e=>/require --strip-stale-signature/.test(String(e.stderr)));
+  assert.throws(()=>runFixtureCommand(process.execPath,[embed,src,path.join(root,'plain/Runner.app'),addon,bundle],{stdio:'pipe'}),e=>/require --strip-stale-signature/.test(String(e.stderr)));
   assert.equal(fs.existsSync(path.join(root,'plain')),false);
   const out=path.join(root,'out/Runner.app');
-  runFixtureCommand(process.execPath,[embed,src,out,addon,'com.rayneo.venus.pub','--strip-stale-signature'],{stdio:'pipe'});
+  runFixtureCommand(process.execPath,[embed,src,out,addon,bundle,'--strip-stale-signature'],{stdio:'pipe'});
   const app=fs.readFileSync(path.join(out,'Frameworks/App.framework/App'));
   assert.equal(sha256(app),'0a78cf75acdaf7b9d999cf27edd4ba7424640811e77cd309fc4c27fcb8c49273');assert.ok(verifyStockApp(app,'ios1021-download'));
   assert.equal(fs.existsSync(path.join(out,'_CodeSignature')),false);assert.ok(fs.existsSync(path.join(src,'_CodeSignature/CodeResources')));
@@ -349,6 +406,57 @@ test('real 1.0.21 input: unsigned preparation leaves App.framework byte-identica
   const plist=plistJSON(path.join(out,'Info.plist'));
   for(const k of ['TIOExperimentalOTAQueryRouting','TIOExperimentalOTABuild','UISupportedDevices','TIOHostProfile'])assert.equal(plist[k],undefined,k);
   assert.equal(fs.existsSync(path.join(out,leakGuard.CANDIDATE_RESOURCE)),false);
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+test('native guards compiled for one bundle refuse the standard ID and every other suffix',()=>{
+ const root=fs.mkdtempSync(path.join(packageTestDirectory,'build','bundle-guards-'));
+ try{
+  for(const bundle of [STOCK_BUNDLE,STOCK_BUNDLE+'.test1',STOCK_BUNDLE+'.test2']){
+   const binary=path.join(root,bundle);
+   runFixtureCommand('xcrun',['clang','-fobjc-arc','-fblocks','-framework','Foundation','-fsanitize=address,undefined','-I',packageTestDirectory,`-DTIO_TARGET_BUNDLE_ID="${bundle}"`,path.join(packageTestDirectory,'HostCompatibilityTests.m'),'-o',binary],{stdio:'pipe'});
+   runFixtureCommand(binary,[],{stdio:'pipe'});
+  }
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+test('alternate unsigned packaging: pinned stock input, own profile, nested bundles omitted, visible marker, wrong addon refused',t=>{
+ const p=process.env.IOS1021_TEST_APP,realAddon=path.join(packageTestDirectory,'build/mapkit/TurboIOPrivateAddon.dylib');
+ if(!p)return t.skip('set IOS1021_TEST_APP');if(!fs.existsSync(realAddon))return t.skip('build the embedded addon first');
+ const bundle=STOCK_BUNDLE+'.test1',root=fs.mkdtempSync(path.join(packageTestDirectory,'build','alt-prepare-'));
+ try{
+  const src=path.join(root,'src/Runner.app');fs.mkdirSync(path.join(src,'Frameworks/App.framework'),{recursive:true});
+  for(const f of ['Info.plist','Runner','Frameworks/App.framework/App','Frameworks/App.framework/Info.plist'])fs.copyFileSync(path.join(p,f),path.join(src,f));
+  for(const directory of ['PlugIns/Fixture.appex','Watch/Fixture.app','AppClips/Fixture.app']){fs.mkdirSync(path.join(src,directory),{recursive:true});fs.writeFileSync(path.join(src,directory,'fixture'),'cannot be provisioned by the app profile');}
+  fs.mkdirSync(path.join(src,'zh-Hans.lproj'));fs.writeFileSync(path.join(src,'zh-Hans.lproj/InfoPlist.strings'),'<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleDisplayName</key><string>RayNeo AI</string></dict></plist>');
+  // Non-executed Mach-O fixtures retain the real image structure and guard symbols.
+  // They are never signed: identity strings appended here model the build's constants.
+  const bytes=fs.readFileSync(realAddon),prefix=Buffer.from('turbo alternate bundle=');
+  for(let at=bytes.indexOf(prefix);at!==-1;at=bytes.indexOf(prefix,at+prefix.length))bytes.fill(0,at,at+prefix.length);
+  const addon=path.join(root,'fixture.dylib');fs.writeFileSync(addon,Buffer.concat([bytes,Buffer.from(bundle+'\0'+alternateBundleMarker(bundle)+'\0')]));
+  validateOptions({...options,bundle});validateOptions({...optionsDL,bundle});
+  const appInfo=plistJSON(path.join(src,'Info.plist')),runner=fs.readFileSync(path.join(src,'Runner')),appImage=fs.readFileSync(path.join(src,'Frameworks/App.framework/App'));
+  const frameworks=Object.fromEntries(Object.keys(packaging.HOST_PROFILES.ios1021.frameworks).map(n=>[n,fs.readFileSync(path.join(p,'Frameworks',n))]));
+  validateHost(appInfo,runner,appImage,'ios1021',frameworks);validateHost(appInfo,runner,appImage,'ios1021-download',frameworks);
+  const embed=path.join(packageTestDirectory,'macho-embed.mjs'),out=path.join(root,'out/Runner.app');
+  const refuse=(id,dir)=>assert.throws(()=>runFixtureCommand(process.execPath,[embed,src,path.join(root,dir,'Runner.app'),addon,id,'--strip-stale-signature'],{stdio:'pipe'}),e=>/addon_bundle_mismatch/.test(String(e.stderr)));
+  refuse(STOCK_BUNDLE+'.test2','wrong');refuse(STOCK_BUNDLE,'standard');assert.equal(fs.existsSync(path.join(root,'wrong')),false);assert.equal(fs.existsSync(path.join(root,'standard')),false);
+  for(const id of [STOCK_BUNDLE,STOCK_BUNDLE+'.test2']){
+   const args=Object.entries({...options,app:src,addon,bundle:id,out:path.join(root,'mixed-package')}).flatMap(([key,value])=>['--'+key,value]);
+   const pkg=spawnSync(process.execPath,[path.join(packageTestDirectory,'package.mjs'),...args],{encoding:'utf8'});
+   assert.equal(pkg.status,1);assert.match(pkg.stderr,/addon_bundle_mismatch/);assert.equal(fs.existsSync(path.join(root,'mixed-package')),false);
+  }
+  runFixtureCommand(process.execPath,[embed,src,out,addon,bundle,'--strip-stale-signature'],{stdio:'pipe'});
+  const outputInfo=plistJSON(path.join(out,'Info.plist'));validateOutputBundle(outputInfo,bundle);
+  assert.equal(outputInfo.CFBundleDisplayName,'RayNeo AI [ALT test1]');assert.equal(plistJSON(path.join(out,'zh-Hans.lproj/InfoPlist.strings')).CFBundleDisplayName,outputInfo.CFBundleDisplayName);
+  for(const name of ['PlugIns','Watch','AppClips']){assert.equal(fs.existsSync(path.join(out,name)),false);assert.equal(fs.existsSync(path.join(src,name)),true);}
+  const report=JSON.parse(fs.readFileSync(path.join(out,'TurboIOPrivatePreparation.json')));
+  assert.equal(report.bundleID,bundle);assert.equal(report.alternateBundle,true);assert.deepEqual(report.removedNestedBundles,['AppClips','PlugIns','Watch']);assert.match(report.extensionPolicy,/one app provisioning profile/);
+  assert.deepEqual(bundleReport(bundle,report),{bundleID:bundle,alternateBundle:true,removedNestedBundles:report.removedNestedBundles,extensionPolicy:report.extensionPolicy});
+  assert.deepEqual(bundleReport(STOCK_BUNDLE,report),{}); // No new keys in default generated reports.
+  assert.equal(inspectMachO(fs.readFileSync(path.join(out,'Runner'))).uuid,uuid1021);
+  const stock=fs.readFileSync(path.join(out,'Frameworks/App.framework/App'));assert.ok(stock.equals(appImage));assert.ok(packaging.verifyStockApp(stock,'ios1021-download'));
+  assert.equal(sha256(patch(stock,'ios1021').output),routeProfile('ios1021').outputSHA);
+  const profile={certs:[options.identity],devices:[options.device],expires:'2099-01-01T00:00:00Z',entitlements:{'application-identifier':'EXAMPLE.'+bundle,'get-task-allow':true,'keychain-access-groups':['EXAMPLE.'+bundle]}};
+  assert.equal(entitlementsFor(profile,{...options,bundle})['application-identifier'],'EXAMPLE.'+outputInfo.CFBundleIdentifier);
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
 test('wrappers: --host is required and is 1021 or 1021-full; --host 1021 packages without firmware or product; the gate has no 1.0.11 stage',()=>{
@@ -523,7 +631,7 @@ test('turbo-package.sh builds the addon fresh with the requested flags before si
  const scrub=pos('for name in $(compgen -e); do [[ $name != TIO_* ]] || unset "$name"; done');
  const remove=pos('rm -f "$ADDON"\n[[ ! -e "$ADDON" ]] ||');
  const sourced=pos('source "$TURBO_INPUTS/package.env"');
- const build=pos('run_logged addon-build env -i PATH="$PATH" HOME="$HOME" ${DEVELOPER_DIR:+DEVELOPER_DIR="$DEVELOPER_DIR"} "${build_flags[@]}" bash "$ED/build.sh" embedded com.rayneo.venus.pub');
+ const build=pos('run_logged addon-build env -i PATH="$PATH" HOME="$HOME" ${DEVELOPER_DIR:+DEVELOPER_DIR="$DEVELOPER_DIR"} "${build_flags[@]}" bash "$ED/build.sh" embedded "$bundle"');
  const built=pos("[[ -f \"$ADDON\" ]] || { echo 'PACKAGE FAIL: the addon was not built in this run' >&2; exit 1; }");
  const check=pos('run_logged addon-check addon_check');
  const buildOnly=pos('if [[ $build_only == 1 ]]; then');

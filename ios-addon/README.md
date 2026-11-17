@@ -54,8 +54,9 @@ The stock app, the signing setup and the release ZIPs stay outside the repo. The
 | --- | --- |
 | `TURBO_PROFILE`, `TURBO_SIGN_ID`, `TURBO_DEVICE` | Signing a package |
 | `TURBO_APP1021` | Stock 1.0.21 `Runner.app`: every package, `test.py`'s real-app checks and the gate's `host1021` stage |
+| `TURBO_BUNDLE` (optional) | Output app and addon host bundle ID; omitted means `com.rayneo.venus.pub` |
 
-No other variable is read. `TURBO_APP107`, `TURBO_PATCHED_APP`, `TURBO_APP1011`, `TURBO_PRODUCT` and `TURBO_FIRMWARE` are ignored.
+`TURBO_APP107`, `TURBO_PATCHED_APP`, `TURBO_APP1011`, `TURBO_PRODUCT` and `TURBO_FIRMWARE` are ignored.
 
 The packager finds both ZIPs under `$TURBO_INPUTS` at the paths `releases.json` names (`tmg12/…` and `tmg12-emu/stock/…`), and refuses each unless its size and SHA-256 match. The firmware stages use the LLVM tools in `$TURBO_INPUTS/toolchain/llvm-bin`.
 
@@ -119,6 +120,16 @@ Options:
 - `--apple-ai <new-directory>`: build with Apple on-device answers and bundle `TurboAppleAI.dylib`.
 
 Install the IPA over the existing RayNeo app (`com.rayneo.venus.pub`). Never delete that app: deleting it wipes the pairing and the flash gate's state. Then flash with [OTA.md](OTA.md).
+
+### Optional Personal Team bundle ID
+
+For a free personal Apple ID and a phone without the RayNeo app, Xcode may refuse to provision RayNeo's registered identifier. The fallback is `TURBO_BUNDLE=com.rayneo.venus.pub.<suffix>` in the external `package.env`, where the suffix is 1–24 lowercase ASCII letters or digits. Obtain an explicit development profile for that exact identifier, your certificate and your phone. Leave `TURBO_BUNDLE` unset for the standard build. Free provisioning profiles expire after 7 days; rebuild and reinstall with a renewed profile.
+
+The package wrapper accepts `--bundle com.rayneo.venus.pub.<suffix>` as an override. Direct builds accept the identifier as `bash ios-addon/build.sh embedded <bundle-id>` or through `TURBO_BUNDLE`; the low-level packager accepts `--bundle <bundle-id>` or `TURBO_BUNDLE`. Each addon expects exactly one identifier, and packaging refuses a differently configured addon. The input is still the pinned stock `com.rayneo.venus.pub` 1.0.21 (1) app.
+
+An alternate app installs beside the App Store app and has separate data and keychain access; it cannot preserve the App Store app's pairing or flash gate state. Its home-screen name reads `RayNeo AI [ALT <suffix>]` and the Turbo panel title has `[ALT]`. Alternate reports record `bundleID`, `alternateBundle` and `removedNestedBundles`; standard report files retain their existing format. The alternate package omits `PlugIns`, `Watch` and `AppClips`, because a single app profile cannot cover their separate identifiers. The accepted stock app currently contains none of these.
+
+Expect no push notifications or Sign in with Apple with a basic free profile. Associated domains and iCloud are also unavailable to a Personal Team. App Groups and shared keychain grants are never invented: only grants already in the supplied profile survive. RayNeo servers and third-party SDKs may depend on the original bundle ID, team or URL registrations; their behavior is unknown. Pairing and RayNeo login under an alternate ID are untested. URL schemes are kept, so callbacks can conflict if both apps are installed. Agents still require Joey's explicit authorization for any install or device action; an alternate package grants no flash authorization.
 
 ## Test
 

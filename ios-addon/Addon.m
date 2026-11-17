@@ -73,10 +73,10 @@ static NSString *AddonUILanguage(void){NSString *l=NSLocale.preferredLanguages.f
 #import "DisplayPhoneUI.h"
 #endif
 
-#ifndef TIO_TARGET_BUNDLE_ID
-#define TIO_TARGET_BUNDLE_ID "com.rayneo.venus.pub"
-#endif
 static NSString *const TargetBundle=@TIO_TARGET_BUNDLE_ID;
+#if TIO_ALTERNATE_BUNDLE
+__attribute__((used,visibility("default"))) const char TIOAlternateBundleMarker[]="turbo alternate bundle=" TIO_TARGET_BUNDLE_ID;
+#endif
 
 // No Frida, inline patching, device credentials or official token access.
 static NSString *const Domain=@"io.turboio.official-private-addon";
@@ -503,6 +503,9 @@ static NSString *TIOHubBoundStatus(NSString *value) {
 - (void)refresh {
     self.sections=TIOHubSectionsForProfile(self.page,TIOHostProfile());
     self.title=self.page.length ? ([self catalogRowForKey:self.page][@"title"] ?: TIOText(@"hub.title")) : TIOText(@"hub.title");
+#if TIO_ALTERNATE_BUNDLE
+    self.title=[self.title stringByAppendingString:@" [ALT]"];
+#endif
     if (!self.page.length) {
         NSMutableString *body=[TIOText(@"hub.info.body") mutableCopy];
         for (NSString *infoKey in [[TIOStringTable() allKeys] sortedArrayUsingSelector:@selector(compare:)]) {

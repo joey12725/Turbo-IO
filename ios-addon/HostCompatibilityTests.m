@@ -1,11 +1,12 @@
 #import "HostCompatibility.h"
+#import "OTAHost.h"
 #include <assert.h>
 int main(void){@autoreleasepool{
     struct {struct mach_header_64 h;struct uuid_command c;} image={0};
     image.h.magic=MH_MAGIC_64;image.h.filetype=MH_EXECUTE;image.h.ncmds=1;image.h.sizeofcmds=sizeof(image.c);image.c.cmd=LC_UUID;image.c.cmdsize=sizeof(image.c);
     // 1.0.21/1: download-only (C19) without its own marker; the full profile "ios1021" (C20 onward) only with the
     // exact marker "ios1021" on the exact 1.0.21/1 image.
-    NSDictionary *n=@{@"CFBundleIdentifier":@"com.rayneo.venus.pub",@"CFBundleShortVersionString":@"1.0.21",@"CFBundleVersion":@"1"};
+    NSDictionary *n=@{@"CFBundleIdentifier":@TIO_TARGET_BUNDLE_ID,@"CFBundleShortVersionString":@"1.0.21",@"CFBundleVersion":@"1"};
     assert([TIOHostDownloadOnlyUUID(n) isEqual:@"74DA0780-DCF0-384F-9E84-1AC12F56CDF5"]);
     for(NSArray *pair in @[@[@"1.0.21",@"259"],@[@"1.0.21",@"2"],@[@"1.0.20",@"1"],@[@"1.0.22",@"1"],@[@"1.0.21",@""]])assert(!TIOHostDownloadOnlyUUID(@{@"CFBundleShortVersionString":pair[0],@"CFBundleVersion":pair[1]}));
     assert(!TIOHostDownloadOnlyUUID(@{}));assert(!TIOHostProfileFor(NULL,n));assert(!TIOHostProfileFor(NULL,@{}));
@@ -26,6 +27,15 @@ int main(void){@autoreleasepool{
         assert([TIOHostProfileFor((const void *)&image,m) isEqual:@"ios1021-download"]);assert(!TIOHostFullImageMatches((const void *)&image,m));assert(!TIOHostFullExpectedUUID(m));
     }
     NSMutableDictionary *marked=[n mutableCopy];marked[@"TIOHostProfile"]=@"ios1021";
+    assert(TIOOTAHostMatches(marked));
+    for(NSString *bundle in @[@"com.rayneo.venus.pub",@"com.rayneo.venus.pub.test1",@"com.rayneo.venus.pub.test2"]){
+        NSMutableDictionary *candidate=[marked mutableCopy];candidate[@"CFBundleIdentifier"]=bundle;
+        BOOL expected=[bundle isEqual:@TIO_TARGET_BUNDLE_ID];
+        assert((TIOHostProfileFor((const void *)&image,candidate)!=nil)==expected);
+        assert(TIOHostFullImageMatches((const void *)&image,candidate)==expected);
+        assert(TIOHostDownloadOnlyImageMatches((const void *)&image,candidate)==expected);
+        assert(TIOOTAHostMatches(candidate)==expected);
+    }
     assert([TIOHostProfileFor((const void *)&image,marked) isEqual:@"ios1021"]);assert(TIOHostFullImageMatches((const void *)&image,marked));
     assert([TIOHostFullExpectedUUID(marked) isEqual:@"74DA0780-DCF0-384F-9E84-1AC12F56CDF5"]);
     assert([TIOHostFullMarkerProfile(marked) isEqual:@"ios1021"]&&!TIOHostFullMarkerProfile(n));

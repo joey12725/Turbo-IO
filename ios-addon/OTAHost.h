@@ -1,11 +1,12 @@
 #import <Foundation/Foundation.h>
+#import "HostBundle.h"
 
 // The TMG flash path runs ONLY on the exact full host: RayNeo AI 1.0.21/1 with the packager's
 // TIOHostProfile marker "ios1021". Matching this does NOT allow a transfer by itself:
 // TIOOTAFlashAuthorize also checks the pinned main image (TIOHostFullImageMatches) and the
 // other conditions; see ExperimentalOTAFlash.m.
 static inline BOOL TIOOTA1021HostMatches(NSDictionary *info) {
-    return [info[@"CFBundleIdentifier"] isEqual:@"com.rayneo.venus.pub"] &&
+    return [info[@"CFBundleIdentifier"] isEqual:@TIO_TARGET_BUNDLE_ID] &&
         [info[@"CFBundleShortVersionString"] isEqual:@"1.0.21"] &&
         [info[@"CFBundleVersion"] isEqual:@"1"] &&
         [info[@"TIOHostProfile"] isEqual:@"ios1021"];
